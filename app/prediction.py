@@ -1,6 +1,6 @@
 import tensorflow as tf
 import pandas as pd
-
+import torch.nn as nn
 from app.data_parser import get_data
 
 
@@ -21,7 +21,7 @@ def train_model(model, data):
     return model
 
 
-def create_model():
+def create_adam_model():
     """
     Create the model
     """
@@ -35,4 +35,19 @@ def create_model():
         metrics=["accuracy"],
     )
 
+    return model
+
+
+def sigmoid_model():
+    """
+    Create the sigmoid model
+    """
+    model = nn.Sequential(
+        nn.Linear(input_size, 64),
+        nn.ReLU(),
+        nn.Linear(64, 32),
+        nn.ReLU(),
+        nn.Linear(32, 1),
+        nn.Sigmoid(),
+    )
     return model
