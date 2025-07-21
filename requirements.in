@@ -2,3 +2,4 @@ pandas
 tensorflow
 numpy
 scikit-learn
+Flask

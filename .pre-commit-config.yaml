@@ -10,4 +10,4 @@ repos:
     hooks:
       - id: flake8
         additional_dependencies: []
-        args: ["--ignore=F821,F401,F841,F821,F401,F841"]
+        args: ["--ignore=F821,F401,F841,F821,F401,F841,E501"]
