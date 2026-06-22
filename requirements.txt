@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+aiofiles
+numpy
+tensorflow-cpu
+pandas
+earthaccess
+h5py
+Pillow
