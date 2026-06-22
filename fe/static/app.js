@@ -13,6 +13,7 @@ const OBJECTS = [
   { orbit: 2, angle: 1.2, size: 5, color: "#ffd166", kind: "object" },
   { orbit: 2, angle: 5.0, size: 3, color: "#ff6b6b", kind: "debris" },
   { orbit: 3, angle: 3.3, size: 4, color: "#a78bfa", kind: "object" },
+  { orbit: 3, angle: 1.1, size: 4, color: "#00ff88", kind: "ufo" },
 ];
 
 // ── Canvas setup ──────────────────────────────────────────────────────────────

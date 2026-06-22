@@ -77,6 +77,7 @@ body {
 .map-legend li.orbit::before  { color: rgba(140, 180, 255, 0.6); }
 .map-legend li.object::before { color: #ffd166; }
 .map-legend li.debris::before { color: #ff6b6b; }
+.map-legend li.ufo::before   { color: #00ff88; }
 
 /* Play controls */
 .controls {

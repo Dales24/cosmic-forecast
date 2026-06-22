@@ -40,6 +40,12 @@ class ForecastRequest(BaseModel):
 
 
 # ── API routes ────────────────────────────────────────────────────────────────
+@app.get("/api/objects/{object_slug}")
+def get_objects(object_slug: str, date: str | None = None, limit: int = 20):
+    from app.data_parser import get_data
+    return {"slug": object_slug, "results": get_data(object_slug, date=date, limit=limit)}
+
+
 @app.get("/api/classify/{obj_id}")
 def classify_object(obj_id: int):
     from app.object_classifier import predict_patch
