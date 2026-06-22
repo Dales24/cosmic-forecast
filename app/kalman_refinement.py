@@ -28,7 +28,9 @@ class KalmanRefiner:
         """Fuse transformer prediction with track history."""
         state = self._filters.get(track.track_id)
         if state is None:
-            state = _KalmanState.from_track(track, self.process_noise, self.measurement_noise)
+            state = _KalmanState.from_track(
+                track, self.process_noise, self.measurement_noise
+            )
             for detection in track.detections:
                 dt = max(detection.timestamp - state.timestamp, 1e-6)
                 state.predict(dt)
@@ -92,7 +94,9 @@ class _KalmanState:
             ],
             dtype=np.float64,
         )
-        state = np.array([latest.x, latest.y, velocity[0], velocity[1]], dtype=np.float64)
+        state = np.array(
+            [latest.x, latest.y, velocity[0], velocity[1]], dtype=np.float64
+        )
         covariance = np.eye(4, dtype=np.float64) * 10.0
         return cls(
             state=state,
@@ -127,7 +131,9 @@ class _KalmanState:
         )
         measurement_noise = np.eye(2, dtype=np.float64) * self.measurement_noise
         innovation = measurement - observation @ self.state
-        innovation_cov = observation @ self.covariance @ observation.T + measurement_noise
+        innovation_cov = (
+            observation @ self.covariance @ observation.T + measurement_noise
+        )
         kalman_gain = self.covariance @ observation.T @ np.linalg.inv(innovation_cov)
 
         self.state = self.state + kalman_gain @ innovation

@@ -2,5 +2,5 @@ flake8
 black
 pre-commit
 pytest
-tox 
+tox
 pip-tools

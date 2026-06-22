@@ -14,6 +14,7 @@ client = TestClient(app)
 
 # ── GET / ─────────────────────────────────────────────────────────────────────
 
+
 def test_index_returns_html():
     r = client.get("/")
     assert r.status_code == 200
@@ -23,8 +24,10 @@ def test_index_returns_html():
 # ── GET /api/classify/{obj_id} ────────────────────────────────────────────────
 
 _MOCK_CLASSIFICATION = {
-    "class": "Satellite", "slug": "satellite",
-    "group": "artificial", "confidence": 0.85,
+    "class": "Satellite",
+    "slug": "satellite",
+    "group": "artificial",
+    "confidence": 0.85,
     "probabilities": {"satellite": 0.85},
 }
 
@@ -38,7 +41,9 @@ def _patched_classify():
 
 def test_classify_returns_valid_structure():
     with patch("app.api._get_cnn", return_value=MagicMock()):
-        with patch("app.object_classifier.predict_patch", return_value=_MOCK_CLASSIFICATION):
+        with patch(
+            "app.object_classifier.predict_patch", return_value=_MOCK_CLASSIFICATION
+        ):
             r = client.get("/api/classify/0")
     assert r.status_code == 200
     data = r.json()
@@ -82,14 +87,18 @@ def test_classify_different_ids_produce_different_patches():
 
 # ── POST /api/forecast ────────────────────────────────────────────────────────
 
+
 def test_forecast_returns_waypoints():
     payload = {
         "objects": [
-            {"id": 0, "positions": [
-                [0.10, 0.20, 1000.0],
-                [0.11, 0.21, 1001.0],
-                [0.12, 0.22, 1002.0],
-            ]}
+            {
+                "id": 0,
+                "positions": [
+                    [0.10, 0.20, 1000.0],
+                    [0.11, 0.21, 1001.0],
+                    [0.12, 0.22, 1002.0],
+                ],
+            }
         ]
     }
     r = client.post("/api/forecast", json=payload)
@@ -129,6 +138,7 @@ def test_forecast_empty_objects_list():
 
 # ── GET /api/scene ────────────────────────────────────────────────────────────
 
+
 def test_scene_always_includes_ufo():
     """UFO entry is appended even when CelesTrak calls fail."""
     with patch("app.api._requests.get", side_effect=Exception("no network")):
@@ -142,7 +152,16 @@ def test_scene_ufo_has_required_fields():
     with patch("app.api._requests.get", side_effect=Exception("no network")):
         r = client.get("/api/scene")
     ufo = next(o for o in r.json()["objects"] if o["kind"] == "ufo")
-    for field in ("id", "name", "kind", "x_norm", "y_norm", "vx_norm", "vy_norm", "source"):
+    for field in (
+        "id",
+        "name",
+        "kind",
+        "x_norm",
+        "y_norm",
+        "vx_norm",
+        "vy_norm",
+        "source",
+    ):
         assert field in ufo, f"missing field: {field}"
 
 
@@ -190,7 +209,9 @@ VALID_CSV = (
 
 
 def test_csv_upload_returns_objects_and_predictions():
-    r = client.post("/api/upload/csv", files={"file": ("data.csv", VALID_CSV, "text/csv")})
+    r = client.post(
+        "/api/upload/csv", files={"file": ("data.csv", VALID_CSV, "text/csv")}
+    )
     assert r.status_code == 200
     data = r.json()
     assert len(data["objects"]) == 2
@@ -198,7 +219,9 @@ def test_csv_upload_returns_objects_and_predictions():
 
 
 def test_csv_upload_object_fields():
-    r = client.post("/api/upload/csv", files={"file": ("data.csv", VALID_CSV, "text/csv")})
+    r = client.post(
+        "/api/upload/csv", files={"file": ("data.csv", VALID_CSV, "text/csv")}
+    )
     obj = r.json()["objects"][0]
     for f in ("id", "name", "kind", "x_norm", "y_norm", "vx_norm", "vy_norm", "source"):
         assert f in obj
@@ -206,7 +229,9 @@ def test_csv_upload_object_fields():
 
 
 def test_csv_upload_uses_latest_position():
-    r = client.post("/api/upload/csv", files={"file": ("data.csv", VALID_CSV, "text/csv")})
+    r = client.post(
+        "/api/upload/csv", files={"file": ("data.csv", VALID_CSV, "text/csv")}
+    )
     sat = next(o for o in r.json()["objects"] if o["id"] == "SAT001")
     assert abs(sat["x_norm"] - 0.140) < 1e-6
     assert abs(sat["y_norm"] - (-0.070)) < 1e-6
@@ -220,8 +245,8 @@ def test_csv_upload_computes_velocity():
     )
     r = client.post("/api/upload/csv", files={"file": ("v.csv", csv_data, "text/csv")})
     obj = r.json()["objects"][0]
-    assert abs(obj["vx_norm"] - 2e-5) < 1e-10   # (0.12-0.10)/1000
-    assert abs(obj["vy_norm"] - 4e-5) < 1e-10   # (0.24-0.20)/1000
+    assert abs(obj["vx_norm"] - 2e-5) < 1e-10  # (0.12-0.10)/1000
+    assert abs(obj["vy_norm"] - 4e-5) < 1e-10  # (0.24-0.20)/1000
 
 
 def test_csv_upload_missing_required_columns():
@@ -248,7 +273,9 @@ def test_csv_upload_handles_bom():
 
 
 def test_csv_upload_default_kind_for_missing_kind_column():
-    csv_data = b"id,name,x,y,timestamp\nX,Object X,0.2,0.3,1000\nX,Object X,0.3,0.4,2000\n"
+    csv_data = (
+        b"id,name,x,y,timestamp\nX,Object X,0.2,0.3,1000\nX,Object X,0.3,0.4,2000\n"
+    )
     r = client.post("/api/upload/csv", files={"file": ("k.csv", csv_data, "text/csv")})
     assert r.status_code == 200
     # kind column absent → defaults to 'ufo'
@@ -257,16 +284,20 @@ def test_csv_upload_default_kind_for_missing_kind_column():
 
 # ── POST /api/classify/upload ─────────────────────────────────────────────────
 
+
 def test_classify_upload_returns_classification():
     from PIL import Image
+
     img = Image.fromarray(np.zeros((100, 100, 3), dtype=np.uint8))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
 
     mock_result = {
-        "class": "Galaxy", "slug": "galaxy",
-        "group": "deep_space", "confidence": 0.72,
+        "class": "Galaxy",
+        "slug": "galaxy",
+        "group": "deep_space",
+        "confidence": 0.72,
         "probabilities": {},
     }
     with patch("app.api._get_cnn", return_value=MagicMock()):
@@ -281,6 +312,7 @@ def test_classify_upload_returns_classification():
 
 def test_classify_upload_resizes_to_64x64():
     from PIL import Image
+
     captured = []
 
     def capture(model, patch):
@@ -294,7 +326,9 @@ def test_classify_upload_resizes_to_64x64():
 
     with patch("app.api._get_cnn", return_value=MagicMock()):
         with patch("app.object_classifier.predict_patch", side_effect=capture):
-            client.post("/api/classify/upload", files={"file": ("big.png", buf, "image/png")})
+            client.post(
+                "/api/classify/upload", files={"file": ("big.png", buf, "image/png")}
+            )
 
     assert captured == [(64, 64, 3)]
 
@@ -315,7 +349,7 @@ def test_propagate_tles_produces_valid_position():
     obj = result[0]
     assert obj["kind"] == "iss"
     assert obj["source"] == "celestrak"
-    assert abs(obj["x_norm"]) < 1.0   # within GEO distance
+    assert abs(obj["x_norm"]) < 1.0  # within GEO distance
     assert abs(obj["y_norm"]) < 1.0
 
 
@@ -324,7 +358,7 @@ def test_propagate_tles_normalised_by_geo():
     dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     result = _propagate_tles(_ISS_TLE, dt, limit=1, kind="iss")
     r_norm = (result[0]["x_norm"] ** 2 + result[0]["y_norm"] ** 2) ** 0.5
-    assert 0.12 < r_norm < 0.22   # ISS LEO bracket
+    assert 0.12 < r_norm < 0.22  # ISS LEO bracket
 
 
 def test_propagate_tles_returns_velocity():
@@ -337,7 +371,7 @@ def test_propagate_tles_returns_velocity():
 
 
 def test_propagate_tles_respects_limit():
-    three_tles = _ISS_TLE * 3   # crude repeat
+    three_tles = _ISS_TLE * 3  # crude repeat
     dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
     result = _propagate_tles(three_tles, dt, limit=1, kind="satellite")
     assert len(result) <= 1
@@ -345,15 +379,18 @@ def test_propagate_tles_respects_limit():
 
 def test_propagate_tles_ignores_malformed_lines():
     dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    result = _propagate_tles("GARBAGE\nnot tle\nalso not\n", dt, limit=5, kind="satellite")
+    result = _propagate_tles(
+        "GARBAGE\nnot tle\nalso not\n", dt, limit=5, kind="satellite"
+    )
     assert result == []
 
 
 def test_propagate_tles_without_sgp4_returns_empty():
     import sys
+
     dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
     saved = sys.modules.pop("sgp4.api", None)
-    sys.modules["sgp4.api"] = None   # force ImportError on from sgp4.api import ...
+    sys.modules["sgp4.api"] = None  # force ImportError on from sgp4.api import ...
     try:
         result = _propagate_tles(_ISS_TLE, dt, limit=1, kind="iss")
         assert result == []

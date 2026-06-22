@@ -19,6 +19,7 @@ from app.object_classes import (
 
 # ── Count and completeness ────────────────────────────────────────────────────
 
+
 def test_num_classes_matches_object_classes():
     assert NUM_CLASSES == len(OBJECT_CLASSES)
 
@@ -45,6 +46,7 @@ def test_unknown_objects_count():
 
 # ── Group membership ──────────────────────────────────────────────────────────
 
+
 def test_natural_objects_have_natural_group():
     assert all(o.group == "natural" for o in NATURAL_OBJECTS)
 
@@ -63,23 +65,43 @@ def test_unknown_objects_have_unknown_group():
 
 # ── Expected slugs present ────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("slug", [
-    "asteroid", "comet", "meteor", "meteoroid", "near_earth_object",
-])
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "asteroid",
+        "comet",
+        "meteor",
+        "meteoroid",
+        "near_earth_object",
+    ],
+)
 def test_natural_slugs_present(slug):
     assert slug in CLASS_SLUGS
 
 
-@pytest.mark.parametrize("slug", [
-    "satellite", "space_debris", "rocket_body", "iss",
-])
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "satellite",
+        "space_debris",
+        "rocket_body",
+        "iss",
+    ],
+)
 def test_artificial_slugs_present(slug):
     assert slug in CLASS_SLUGS
 
 
-@pytest.mark.parametrize("slug", [
-    "galaxy", "nebula", "star_cluster", "variable_star",
-])
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "galaxy",
+        "nebula",
+        "star_cluster",
+        "variable_star",
+    ],
+)
 def test_deep_space_slugs_present(slug):
     assert slug in CLASS_SLUGS
 
@@ -90,6 +112,7 @@ def test_ufo_slug_present():
 
 # ── Uniqueness ────────────────────────────────────────────────────────────────
 
+
 def test_slugs_are_unique():
     assert len(CLASS_SLUGS) == len(set(CLASS_SLUGS))
 
@@ -99,6 +122,7 @@ def test_names_are_unique():
 
 
 # ── Lookup tables ─────────────────────────────────────────────────────────────
+
 
 def test_slug_to_index_covers_all_slugs():
     assert set(SLUG_TO_INDEX.keys()) == set(CLASS_SLUGS)
@@ -133,6 +157,7 @@ def test_class_groups_list_matches_object_classes():
 
 # ── ObjectClass dataclass ─────────────────────────────────────────────────────
 
+
 def test_object_class_is_frozen():
     obj = OBJECT_CLASSES[0]
     with pytest.raises((AttributeError, TypeError)):
@@ -160,6 +185,7 @@ def test_object_class_inequality():
 
 # ── No empty strings ─────────────────────────────────────────────────────────
 
+
 def test_no_empty_names():
     assert all(o.name.strip() for o in OBJECT_CLASSES)
 
@@ -170,6 +196,7 @@ def test_no_empty_slugs():
 
 def test_slugs_are_snake_case():
     import re
+
     pattern = re.compile(r"^[a-z][a-z0-9_]*$")
     for slug in CLASS_SLUGS:
         assert pattern.match(slug), f"slug not snake_case: {slug!r}"

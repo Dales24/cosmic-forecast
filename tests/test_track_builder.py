@@ -11,13 +11,15 @@ def _det(frame_id, t, x, y, cls="satellite"):
     return Detection(
         frame_id=frame_id,
         timestamp=float(t),
-        x=float(x), y=float(y),
+        x=float(x),
+        y=float(y),
         patch=np.zeros((64, 64, 3), dtype=np.uint8),
         classification=cls,
     )
 
 
 # ── Basic association ─────────────────────────────────────────────────────────
+
 
 def test_single_detection_creates_track():
     tb = TrackBuilder()
@@ -58,19 +60,20 @@ def test_detection_assigned_to_nearest_track():
 
 # ── Missed frames and pruning ─────────────────────────────────────────────────
 
+
 def test_missed_frame_does_not_immediately_prune():
     tb = TrackBuilder(max_distance=5.0, max_missed_frames=2)
     tb.update([_det(0, 0, 0.0, 0.0)])
-    tb.update([])           # no detection → 1 missed frame
+    tb.update([])  # no detection → 1 missed frame
     assert len(tb.tracks) == 1
 
 
 def test_track_pruned_after_max_missed_frames():
     tb = TrackBuilder(max_distance=5.0, max_missed_frames=2)
     tb.update([_det(0, 0, 0.0, 0.0)])
-    tb.update([])   # miss 1
-    tb.update([])   # miss 2
-    tb.update([])   # miss 3 → prune
+    tb.update([])  # miss 1
+    tb.update([])  # miss 2
+    tb.update([])  # miss 3 → prune
     assert len(tb.tracks) == 0
 
 
@@ -79,20 +82,21 @@ def test_track_survives_within_missed_frame_budget():
     tb.update([_det(0, 0, 0.0, 0.0)])
     tb.update([])
     tb.update([])
-    tb.update([])   # still within budget
+    tb.update([])  # still within budget
     assert len(tb.tracks) == 1
 
 
 def test_missed_count_resets_on_reassociation():
     tb = TrackBuilder(max_distance=5.0, max_missed_frames=2)
     tb.update([_det(0, 0, 0.0, 0.0)])
-    tb.update([])                         # miss 1
-    tb.update([_det(2, 2, 0.2, 0.2)])    # reassociated → count resets
-    tb.update([])                         # miss 1 again
-    assert len(tb.tracks) == 1            # not pruned
+    tb.update([])  # miss 1
+    tb.update([_det(2, 2, 0.2, 0.2)])  # reassociated → count resets
+    tb.update([])  # miss 1 again
+    assert len(tb.tracks) == 1  # not pruned
 
 
 # ── tracks property ───────────────────────────────────────────────────────────
+
 
 def test_tracks_property_returns_list():
     tb = TrackBuilder()
@@ -112,6 +116,7 @@ def test_update_returns_active_tracks():
 
 
 # ── Track contents ────────────────────────────────────────────────────────────
+
 
 def test_track_contains_detections_in_order():
     tb = TrackBuilder(max_distance=10.0)
@@ -143,6 +148,7 @@ def test_track_positions_returns_array():
 
 
 # ── Distance metric ───────────────────────────────────────────────────────────
+
 
 def test_distance_exact_match_is_zero():
     tb = TrackBuilder()

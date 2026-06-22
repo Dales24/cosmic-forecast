@@ -45,7 +45,9 @@ def main() -> None:
         train_ds, val_ds = load_image_dataset(args.data_dir)
         model.fit(train_ds, validation_data=val_ds, epochs=args.epochs)
     elif args.synthetic:
-        images, labels = generate_synthetic_dataset(samples_per_class=args.samples_per_class)
+        images, labels = generate_synthetic_dataset(
+            samples_per_class=args.samples_per_class
+        )
         split = int(len(labels) * 0.8)
         train_model(
             model,

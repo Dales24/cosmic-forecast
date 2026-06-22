@@ -26,9 +26,9 @@ _TIMEOUT = 10  # seconds per request
 
 # ── CelesTrak ─────────────────────────────────────────────────────────────────
 _CELESTRAK_URLS: dict[str, str] = {
-    "satellite":   "https://celestrak.org/pub/TLE/active.txt",
-    "iss":         "https://celestrak.org/pub/TLE/stations.txt",
-    "space_debris":"https://celestrak.org/pub/TLE/debris.txt",
+    "satellite": "https://celestrak.org/pub/TLE/active.txt",
+    "iss": "https://celestrak.org/pub/TLE/stations.txt",
+    "space_debris": "https://celestrak.org/pub/TLE/debris.txt",
     "rocket_body": "https://celestrak.org/pub/TLE/rocket-bodies.txt",
 }
 
@@ -45,13 +45,15 @@ def _parse_tle_text(text: str, limit: int) -> list[dict]:
             and lines[i + 2].startswith("2 ")
         ):
             name, l1, l2 = lines[i], lines[i + 1], lines[i + 2]
-            records.append({
-                "name":       name,
-                "catalog_id": l1[2:7].strip(),
-                "epoch":      l1[18:32].strip(),
-                "tle_line1":  l1,
-                "tle_line2":  l2,
-            })
+            records.append(
+                {
+                    "name": name,
+                    "catalog_id": l1[2:7].strip(),
+                    "epoch": l1[18:32].strip(),
+                    "tle_line1": l1,
+                    "tle_line2": l2,
+                }
+            )
             i += 3
         else:
             i += 1
@@ -76,9 +78,9 @@ def fetch_jpl(date: str | None = None, limit: int = 20) -> list[dict]:
     params = {
         "date-min": date or "now",
         "date-max": "+30",
-        "dist-max": "0.2",   # within 0.2 AU
-        "sort":     "dist",
-        "limit":    str(limit),
+        "dist-max": "0.2",  # within 0.2 AU
+        "sort": "dist",
+        "limit": str(limit),
     }
     resp = requests.get(_JPL_CAD_URL, params=params, timeout=_TIMEOUT)
     resp.raise_for_status()
@@ -91,10 +93,10 @@ def fetch_jpl(date: str | None = None, limit: int = 20) -> list[dict]:
 _SIMBAD_TAP = "https://simbad.u-strasbg.fr/simbad/sim-tap/sync"
 
 _SIMBAD_OTYPES: dict[str, str] = {
-    "galaxy":       "G",
-    "nebula":       "PN",   # planetary nebula; broaden with LIKE 'PN%' below
+    "galaxy": "G",
+    "nebula": "PN",  # planetary nebula; broaden with LIKE 'PN%' below
     "star_cluster": "Cl*",
-    "variable_star":"V*",
+    "variable_star": "V*",
 }
 
 

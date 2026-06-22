@@ -124,7 +124,9 @@ class ForecastPipeline:
                 forecast = predict_trajectory(self.trajectory_model, positions)
                 predicted_xy = forecast[-1]
             else:
-                extrapolated = linear_extrapolation(positions, horizon=self.forecast_horizon)
+                extrapolated = linear_extrapolation(
+                    positions, horizon=self.forecast_horizon
+                )
                 predicted_xy = extrapolated[-1, :2]
 
             predictions.append(

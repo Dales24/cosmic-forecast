@@ -10,4 +10,25 @@ repos:
     hooks:
       - id: flake8
         additional_dependencies: []
-        args: ["--ignore=F821,F401,F841,F821,F401,F841,E501"]
+        # E203 / W503 are intentional black formatting — ignored for compatibility.
+        args: ["--ignore=F401,F821,F841,E501,E203,W503"]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-yaml
+
+  # Coverage gate runs on push (not every commit) — needs the full suite,
+  # which is slow with TensorFlow. Mirrors tox.ini's --cov-fail-under=80.
+  - repo: local
+    hooks:
+      - id: pytest-cov
+        name: pytest coverage >=80%
+        entry: pytest --cov=. --cov-fail-under=80
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

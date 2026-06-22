@@ -9,6 +9,7 @@ from app.kalman_refinement import KalmanRefiner, _KalmanState
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_track(positions, t_start=0.0, dt=1.0, cls="satellite"):
     """Build a Track from a list of (x, y) positions."""
     track = Track(track_id=0, object_class=cls)
@@ -16,7 +17,8 @@ def _make_track(positions, t_start=0.0, dt=1.0, cls="satellite"):
         d = Detection(
             frame_id=i,
             timestamp=t_start + i * dt,
-            x=x, y=y,
+            x=x,
+            y=y,
             patch=np.zeros((64, 64, 3), dtype=np.uint8),
             classification=cls,
         )
@@ -25,6 +27,7 @@ def _make_track(positions, t_start=0.0, dt=1.0, cls="satellite"):
 
 
 # ── _KalmanState ──────────────────────────────────────────────────────────────
+
 
 def test_kalman_state_from_single_detection():
     track = _make_track([(1.0, 2.0)])
@@ -87,10 +90,13 @@ def test_kalman_state_update_reduces_covariance():
 
 # ── KalmanRefiner ─────────────────────────────────────────────────────────────
 
+
 def test_refiner_returns_predicted_position_struct():
     track = _make_track([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)])
     refiner = KalmanRefiner()
-    result = refiner.refine(track, predicted_xy=np.array([3.0, 0.0]), target_timestamp=3.0)
+    result = refiner.refine(
+        track, predicted_xy=np.array([3.0, 0.0]), target_timestamp=3.0
+    )
     assert hasattr(result, "x")
     assert hasattr(result, "y")
     assert hasattr(result, "uncertainty_x")

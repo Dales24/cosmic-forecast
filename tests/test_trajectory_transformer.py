@@ -21,6 +21,7 @@ from app.trajectory_transformer import (
 
 # ── _pad_sequence ─────────────────────────────────────────────────────────────
 
+
 def test_pad_short_sequence():
     pts = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 1.0]])
     padded = _pad_sequence(pts, seq_len=5)
@@ -50,6 +51,7 @@ def test_pad_preserves_last_point():
 
 
 # ── _normalize_sequence ───────────────────────────────────────────────────────
+
 
 def test_normalize_last_xy_becomes_zero():
     pts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 1.0], [3.0, 5.0, 2.0]])
@@ -83,6 +85,7 @@ def test_normalize_single_point():
 
 # ── _denormalize_prediction ───────────────────────────────────────────────────
 
+
 def test_denormalize_adds_origin():
     prediction = np.array([[0.1, 0.2], [0.3, 0.4]])
     origin = np.array([10.0, 20.0])
@@ -100,6 +103,7 @@ def test_denormalize_zero_prediction_returns_origin():
 
 
 # ── linear_extrapolation ──────────────────────────────────────────────────────
+
 
 def test_linear_extrapolation_shape():
     pts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 1.0], [2.0, 4.0, 2.0]])
@@ -130,6 +134,7 @@ def test_linear_extrapolation_timestamps_increase():
 
 # ── create_trajectory_transformer ────────────────────────────────────────────
 
+
 def test_create_transformer_returns_model():
     model = create_trajectory_transformer(seq_len=8, horizon=4, d_model=16)
     assert model is not None
@@ -147,14 +152,19 @@ def test_transformer_output_shape():
 
 # ── generate_synthetic_trajectories ──────────────────────────────────────────
 
+
 def test_synthetic_trajectories_count():
-    seqs, targets = generate_synthetic_trajectories(count=20, seq_len=8, horizon=4, seed=0)
+    seqs, targets = generate_synthetic_trajectories(
+        count=20, seq_len=8, horizon=4, seed=0
+    )
     assert seqs.shape[0] == 20
     assert targets.shape[0] == 20
 
 
 def test_synthetic_trajectories_shape():
-    seqs, targets = generate_synthetic_trajectories(count=10, seq_len=8, horizon=4, seed=0)
+    seqs, targets = generate_synthetic_trajectories(
+        count=10, seq_len=8, horizon=4, seed=0
+    )
     assert seqs.shape[1:] == (8, 3)
     assert targets.shape[1:] == (4, 2)
 
@@ -168,6 +178,7 @@ def test_synthetic_trajectories_reproducible():
 
 # ── predict_trajectory ────────────────────────────────────────────────────────
 
+
 def test_predict_trajectory_output_shape():
     model = create_trajectory_transformer(seq_len=8, horizon=4, d_model=16)
     pts = np.column_stack([np.arange(8), np.zeros(8), np.arange(8, dtype=float)])
@@ -176,6 +187,7 @@ def test_predict_trajectory_output_shape():
 
 
 # ── save and load model ───────────────────────────────────────────────────────
+
 
 def test_save_and_load_trajectory_model(tmp_path):
     model = create_trajectory_transformer(seq_len=8, horizon=4, d_model=16)

@@ -22,7 +22,9 @@ PATCH_SIZE = (64, 64)
 DEFAULT_MODEL_DIR = Path("models/object_classifier")
 
 
-def create_cnn_model(input_shape: tuple[int, int, int] = (*PATCH_SIZE, 3)) -> tf.keras.Model:
+def create_cnn_model(
+    input_shape: tuple[int, int, int] = (*PATCH_SIZE, 3)
+) -> tf.keras.Model:
     """Build a small CNN for multi-class object classification."""
     model = models.Sequential(
         [
@@ -112,7 +114,10 @@ def generate_synthetic_dataset(
             if slug in {"galaxy", "nebula", "star_cluster"}:
                 patch = np.clip(patch.astype(np.int16) + 40, 0, 255).astype(np.uint8)
             elif slug in {"satellite", "iss", "rocket_body"}:
-                patch[PATCH_SIZE[0] // 2 - 2 : PATCH_SIZE[0] // 2 + 2, PATCH_SIZE[1] // 2 - 2 : PATCH_SIZE[1] // 2 + 2] = 255
+                patch[
+                    PATCH_SIZE[0] // 2 - 2 : PATCH_SIZE[0] // 2 + 2,
+                    PATCH_SIZE[1] // 2 - 2 : PATCH_SIZE[1] // 2 + 2,
+                ] = 255
             images.append(patch)
             labels.append(class_index)
 
@@ -164,7 +169,9 @@ def predict_patch(model: tf.keras.Model, patch: np.ndarray) -> dict:
     }
 
 
-def save_model(model: tf.keras.Model, model_dir: str | Path = DEFAULT_MODEL_DIR) -> Path:
+def save_model(
+    model: tf.keras.Model, model_dir: str | Path = DEFAULT_MODEL_DIR
+) -> Path:
     """Persist model weights and class metadata."""
     model_dir = Path(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)

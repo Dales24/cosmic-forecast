@@ -32,11 +32,11 @@ DEEP_SPACE_OBJECTS = (
     ObjectClass("Variable Star", "variable_star", "deep_space"),
 )
 
-UNKNOWN_OBJECTS = (
-    ObjectClass("Unidentified", "ufo", "unknown"),
-)
+UNKNOWN_OBJECTS = (ObjectClass("Unidentified", "ufo", "unknown"),)
 
-OBJECT_CLASSES = NATURAL_OBJECTS + ARTIFICIAL_OBJECTS + DEEP_SPACE_OBJECTS + UNKNOWN_OBJECTS
+OBJECT_CLASSES = (
+    NATURAL_OBJECTS + ARTIFICIAL_OBJECTS + DEEP_SPACE_OBJECTS + UNKNOWN_OBJECTS
+)
 NUM_CLASSES = len(OBJECT_CLASSES)
 CLASS_NAMES = [obj.name for obj in OBJECT_CLASSES]
 CLASS_SLUGS = [obj.slug for obj in OBJECT_CLASSES]

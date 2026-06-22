@@ -21,9 +21,7 @@ def create_trajectory_transformer(
     """Build a lightweight transformer for (x, y, t) sequence forecasting."""
     inputs = layers.Input(shape=(seq_len, 3), name="track_sequence")
     projected = layers.Dense(d_model)(inputs)
-    attended = layers.MultiHeadAttention(num_heads=2, key_dim=16)(
-        projected, projected
-    )
+    attended = layers.MultiHeadAttention(num_heads=2, key_dim=16)(projected, projected)
     pooled = layers.GlobalAveragePooling1D()(attended)
     hidden = layers.Dense(64, activation="relu")(pooled)
     outputs = layers.Dense(horizon * 2, name="future_positions")(hidden)
@@ -52,7 +50,9 @@ def _normalize_sequence(positions: np.ndarray) -> tuple[np.ndarray, np.ndarray, 
     normalized = positions.copy()
     normalized[:, 0] -= origin[0]
     normalized[:, 1] -= origin[1]
-    time_scale = max(np.diff(positions[:, 2]).mean() if len(positions) > 1 else 1.0, 1e-6)
+    time_scale = max(
+        np.diff(positions[:, 2]).mean() if len(positions) > 1 else 1.0, 1e-6
+    )
     normalized[:, 2] = (positions[:, 2] - origin[2]) / time_scale
     return normalized.astype(np.float32), origin, time_scale
 
@@ -137,7 +137,9 @@ def predict_trajectory(
     return _denormalize_prediction(prediction, origin)
 
 
-def linear_extrapolation(positions: np.ndarray, horizon: int = DEFAULT_HORIZON) -> np.ndarray:
+def linear_extrapolation(
+    positions: np.ndarray, horizon: int = DEFAULT_HORIZON
+) -> np.ndarray:
     """Fallback forecast using constant velocity from the last two points."""
     last = positions[-1]
     previous = positions[-2]

@@ -74,7 +74,9 @@ def test_kalman_refiner_returns_uncertainty():
         ],
     )
     refiner = KalmanRefiner()
-    result = refiner.refine(track, predicted_xy=np.array([6.0, 3.0]), target_timestamp=3.0)
+    result = refiner.refine(
+        track, predicted_xy=np.array([6.0, 3.0]), target_timestamp=3.0
+    )
 
     assert result.track_id == 1
     assert result.uncertainty_x > 0.0

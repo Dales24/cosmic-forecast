@@ -65,6 +65,7 @@ def test_parse_tle_whitespace_stripped():
 
 # ── fetch_celestrak ───────────────────────────────────────────────────────────
 
+
 def _mock_response(text=""):
     resp = MagicMock()
     resp.text = text
@@ -99,12 +100,15 @@ def test_fetch_celestrak_unknown_slug_raises():
 
 
 def test_fetch_celestrak_respects_limit():
-    with patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE * 10)):
+    with patch(
+        "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE * 10)
+    ):
         result = fetch_celestrak("satellite", limit=2)
     assert len(result) <= 2
 
 
 # ── fetch_jpl ─────────────────────────────────────────────────────────────────
+
 
 def _jpl_response(data=None):
     resp = MagicMock()
@@ -147,6 +151,7 @@ def test_fetch_jpl_empty_data():
 
 # ── fetch_simbad ──────────────────────────────────────────────────────────────
 
+
 def _simbad_response(rows=None):
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
@@ -187,6 +192,7 @@ def test_fetch_simbad_nebula_slug():
 
 # ── get_data routing ──────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("slug", ["satellite", "iss", "space_debris", "rocket_body"])
 def test_get_data_celestrak_slugs_route_correctly(slug):
     with patch("app.data_parser.fetch_celestrak", return_value=[]) as mock:
@@ -194,7 +200,9 @@ def test_get_data_celestrak_slugs_route_correctly(slug):
     mock.assert_called_once_with(slug, 5)
 
 
-@pytest.mark.parametrize("slug", ["asteroid", "comet", "meteor", "meteoroid", "near_earth_object"])
+@pytest.mark.parametrize(
+    "slug", ["asteroid", "comet", "meteor", "meteoroid", "near_earth_object"]
+)
 def test_get_data_jpl_slugs_route_correctly(slug):
     with patch("app.data_parser.fetch_jpl", return_value=[]) as mock:
         get_data(slug, date="2025-01-01", limit=10)
