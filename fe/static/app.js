@@ -190,6 +190,7 @@ function updateLegend() {
 
 function _legendItem(kind, bullet, color, label, count) {
   const li   = document.createElement("li");
+  if (kind) li.dataset.kind = kind;
   const dot  = document.createElement("span");
   dot.textContent = bullet + " ";
   dot.style.color = color;
@@ -729,3 +730,41 @@ async function handleCSVUpload(file) {
 
   loadScene(now.toISOString());
 })();
+
+// ── Testing interface (no-op in browser where `module` is undefined) ──────────
+if (typeof module !== "undefined") {
+  module.exports = {
+    // Constants
+    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS,
+    // Stateless pure functions
+    esc,
+    effectiveTime,
+    findObjectAt,
+    // Async handlers
+    loadScene, handleCSVUpload, classifyUploadFile,
+    updateLegend, hideObjectInfo, showObjectInfo,
+    // Mutable state (getters/setters so tests can read and write the closure vars)
+    get filterKind()    { return filterKind; },
+    set filterKind(v)   { filterKind = v; },
+    get sceneObjects()  { return sceneObjects; },
+    set sceneObjects(v) { sceneObjects = v; objPositions = v.map(() => ({ x: 0, y: 0 })); },
+    get objPositions()  { return objPositions; },
+    set objPositions(v) { objPositions = v; },
+    get panX()          { return panX; },
+    set panX(v)         { panX = v; },
+    get panY()          { return panY; },
+    set panY(v)         { panY = v; },
+    get zoom()          { return zoom; },
+    set zoom(v)         { zoom = v; },
+    get simMode()       { return simMode; },
+    set simMode(v)      { simMode = v; },
+    get simPaused()     { return simPaused; },
+    set simPaused(v)    { simPaused = v; },
+    get simStartReal()  { return simStartReal; },
+    set simStartReal(v) { simStartReal = v; },
+    get simStartEff()   { return simStartEff; },
+    set simStartEff(v)  { simStartEff = v; },
+    get forecastPaths() { return forecastPaths; },
+    set forecastPaths(v){ forecastPaths = v; },
+  };
+}

@@ -1,0 +1,16 @@
+{
+  "name": "cosmic-forecast-fe",
+  "private": true,
+  "scripts": {
+    "test": "jest --forceExit"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"],
+    "testMatch": ["<rootDir>/tests/**/*.test.js"]
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}

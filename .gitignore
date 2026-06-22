@@ -208,3 +208,8 @@ __marimo__/
 settings.ini
 models/
 data/
+
+# Node / frontend
+fe/node_modules/
+fe/package-lock.json
+fe/coverage/
