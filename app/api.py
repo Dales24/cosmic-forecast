@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import requests as _requests
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -155,6 +155,93 @@ def classify_object(obj_id: int):
     cnn = _get_cnn()
     rng = np.random.default_rng(seed=obj_id * 137 + 42)
     patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
+    return predict_patch(cnn, patch)
+
+
+@app.post("/api/upload/csv")
+async def upload_csv(file: UploadFile = File(...)):
+    import csv, io as _io
+    from app.trajectory_transformer import linear_extrapolation
+
+    text   = (await file.read()).decode("utf-8-sig")
+    reader = csv.DictReader(_io.StringIO(text))
+
+    # Required columns
+    required = {"id", "x", "y", "timestamp"}
+    if not reader.fieldnames or not required.issubset(
+        {f.strip().lower() for f in reader.fieldnames}
+    ):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=422,
+            detail=f"CSV must have columns: {', '.join(sorted(required))}",
+        )
+
+    # Normalise header names
+    norm = {f.strip(): f.strip().lower() for f in reader.fieldnames}
+
+    groups: dict[str, dict] = {}
+    for raw in reader:
+        row    = {norm.get(k, k.strip().lower()): v.strip() for k, v in raw.items()}
+        obj_id = row.get("id", "").strip()
+        if not obj_id:
+            continue
+        if obj_id not in groups:
+            groups[obj_id] = {
+                "id":        obj_id,
+                "name":      row.get("name", obj_id),
+                "kind":      row.get("kind", "ufo"),
+                "positions": [],
+            }
+        try:
+            groups[obj_id]["positions"].append(
+                [float(row["x"]), float(row["y"]), float(row["timestamp"])]
+            )
+        except (KeyError, ValueError):
+            continue
+
+    scene_objects: list[dict] = []
+    predictions:  list[dict] = []
+
+    for idx, obj_data in enumerate(groups.values()):
+        pts = sorted(obj_data["positions"], key=lambda p: p[2])
+        if len(pts) < 2:
+            continue
+
+        x_now, y_now, _ = pts[-1]
+        x_prev, y_prev, t_prev = pts[-2]
+        x_curr, y_curr, t_curr = pts[-1]
+        dt = t_curr - t_prev
+        vx = (x_curr - x_prev) / dt if dt > 0 else 0.0
+        vy = (y_curr - y_prev) / dt if dt > 0 else 0.0
+
+        scene_objects.append({
+            "id":      obj_data["id"],
+            "name":    obj_data["name"],
+            "kind":    obj_data["kind"],
+            "x_norm":  x_now,
+            "y_norm":  y_now,
+            "vx_norm": vx,
+            "vy_norm": vy,
+            "source":  "upload",
+        })
+
+        pos_arr  = np.array(pts, dtype=np.float32)
+        forecast = linear_extrapolation(pos_arr, horizon=50)
+        predictions.append({"id": idx, "waypoints": forecast[:, :2].tolist()})
+
+    return {"objects": scene_objects, "predictions": predictions}
+
+
+@app.post("/api/classify/upload")
+async def classify_upload(file: UploadFile = File(...)):
+    import io
+    from PIL import Image
+    contents = await file.read()
+    img   = Image.open(io.BytesIO(contents)).convert("RGB")
+    patch = np.array(img.resize((64, 64)), dtype=np.uint8)
+    from app.object_classifier import predict_patch
+    cnn = _get_cnn()
     return predict_patch(cnn, patch)
 
 

@@ -53,6 +53,51 @@
         </form>
 
         <div id="scene-result"></div>
+
+        <div class="section-divider"></div>
+
+        <div class="upload-classifier">
+          <h3 class="upload-title">Classify Image Patch</h3>
+          <div class="upload-zone" id="upload-zone">
+            <span class="upload-icon">🔭</span>
+            <span>Drop an image or <label for="img-upload" class="upload-link">browse</label></span>
+            <input id="img-upload" type="file" accept="image/*" hidden>
+          </div>
+          <div id="upload-result" style="display:none">
+            <div class="upload-preview-row">
+              <img id="upload-preview" class="upload-preview-img" alt="Preview">
+              <div class="upload-class-info">
+                <div id="upload-class-name" class="upload-class-label">—</div>
+                <div id="upload-group-wrap" style="margin-top:0.25rem"></div>
+                <div class="upload-conf-row">
+                  <span class="key">Confidence</span>
+                  <span id="upload-conf-pct" class="val">—</span>
+                </div>
+                <div class="conf-bar-wrap">
+                  <div class="conf-bar" id="upload-conf-bar" style="width:0%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="upload-classifier">
+          <h3 class="upload-title">Upload Position CSV</h3>
+          <p class="upload-csv-hint">
+            Columns: <code>id, name, kind, x, y, timestamp</code> &mdash;
+            2+ rows per object. x/y are normalised orbital units (1.0&nbsp;=&nbsp;GEO).
+            <a href="#" id="csv-template-link" class="upload-link">Download template</a>
+          </p>
+          <div class="upload-zone" id="csv-zone">
+            <span class="upload-icon">📡</span>
+            <span>Drop CSV or <label for="csv-upload" class="upload-link">browse</label></span>
+            <input id="csv-upload" type="file" accept=".csv,text/csv" hidden>
+          </div>
+          <div id="csv-result" class="csv-status" style="display:none"></div>
+        </div>
+
       </div>
 
       <!-- Object detail view (shown on click) -->

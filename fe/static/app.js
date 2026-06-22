@@ -568,6 +568,151 @@ function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// ── Image upload classifier ───────────────────────────────────────────────────
+const uploadZone    = document.getElementById("upload-zone");
+const imgUploadEl   = document.getElementById("img-upload");
+const uploadResult  = document.getElementById("upload-result");
+const uploadPreview = document.getElementById("upload-preview");
+
+uploadZone.addEventListener("click", () => imgUploadEl.click());
+
+uploadZone.addEventListener("dragover", e => {
+  e.preventDefault();
+  uploadZone.classList.add("drag-over");
+});
+uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("drag-over"));
+uploadZone.addEventListener("drop", e => {
+  e.preventDefault();
+  uploadZone.classList.remove("drag-over");
+  const file = e.dataTransfer?.files?.[0];
+  if (file && file.type.startsWith("image/")) classifyUploadFile(file);
+});
+
+imgUploadEl.addEventListener("change", () => {
+  const file = imgUploadEl.files?.[0];
+  if (file) classifyUploadFile(file);
+});
+
+async function classifyUploadFile(file) {
+  // Show preview immediately
+  const reader = new FileReader();
+  reader.onload = e => { uploadPreview.src = e.target.result; };
+  reader.readAsDataURL(file);
+
+  uploadResult.style.display = "block";
+  document.getElementById("upload-class-name").textContent = "Classifying…";
+  document.getElementById("upload-group-wrap").innerHTML   = "";
+  document.getElementById("upload-conf-pct").textContent   = "—";
+  document.getElementById("upload-conf-bar").style.width   = "0%";
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch("/api/classify/upload", { method: "POST", body: form });
+    const data = await resp.json();
+
+    document.getElementById("upload-class-name").textContent = data.class || "Unknown";
+    document.getElementById("upload-conf-pct").textContent   =
+      (data.confidence * 100).toFixed(1) + "%";
+    document.getElementById("upload-conf-bar").style.width   =
+      (data.confidence * 100).toFixed(1) + "%";
+    const badgeClass = "badge-" + (data.group || "unknown");
+    document.getElementById("upload-group-wrap").innerHTML =
+      '<span class="obj-class-badge ' + badgeClass + '">' +
+      (data.group || "unknown").replace("_", " ") + "</span>";
+  } catch {
+    document.getElementById("upload-class-name").textContent = "Classification failed";
+  }
+}
+
+// ── CSV upload ────────────────────────────────────────────────────────────────
+const CSV_TEMPLATE = [
+  "id,name,kind,x,y,timestamp",
+  "OBJ001,My Satellite,satellite,0.120,-0.050,1704067200",
+  "OBJ001,My Satellite,satellite,0.130,-0.060,1704068200",
+  "OBJ001,My Satellite,satellite,0.140,-0.070,1704069200",
+  "OBJ002,Unknown Object,ufo,0.280,-0.200,1704067200",
+  "OBJ002,Unknown Object,ufo,0.285,-0.205,1704068200",
+  "OBJ002,Unknown Object,ufo,0.290,-0.210,1704069200",
+].join("\n");
+
+document.getElementById("csv-template-link").addEventListener("click", e => {
+  e.preventDefault();
+  const blob = new Blob([CSV_TEMPLATE], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "cosmic_forecast_template.csv";
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+});
+
+const csvZone    = document.getElementById("csv-zone");
+const csvUpload  = document.getElementById("csv-upload");
+const csvResult  = document.getElementById("csv-result");
+
+csvZone.addEventListener("click", () => csvUpload.click());
+csvZone.addEventListener("dragover", e => { e.preventDefault(); csvZone.classList.add("drag-over"); });
+csvZone.addEventListener("dragleave", () => csvZone.classList.remove("drag-over"));
+csvZone.addEventListener("drop", e => {
+  e.preventDefault(); csvZone.classList.remove("drag-over");
+  const f = e.dataTransfer?.files?.[0];
+  if (f) handleCSVUpload(f);
+});
+csvUpload.addEventListener("change", () => {
+  const f = csvUpload.files?.[0];
+  if (f) handleCSVUpload(f);
+});
+
+async function handleCSVUpload(file) {
+  csvResult.className    = "csv-status";
+  csvResult.style.display = "block";
+  csvResult.textContent  = "Parsing…";
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch("/api/upload/csv", { method: "POST", body: form });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || resp.statusText);
+    }
+
+    const data = await resp.json();
+    const n    = data.objects?.length ?? 0;
+    const p    = data.predictions?.length ?? 0;
+
+    if (n === 0) throw new Error("No valid objects found — check that each id has ≥ 2 rows.");
+
+    // Replace scene with uploaded objects
+    sceneObjects  = data.objects;
+    objPositions  = sceneObjects.map(() => ({ x: 0, y: 0 }));
+    forecastPaths = data.predictions;
+    for (const k in classCache) delete classCache[k];
+    hoveredIdx  = -1;
+    selectedIdx = null;
+    hideObjectInfo();
+    filterKind = null;
+    updateLegend();
+
+    // Freeze at latest timestamp from the data
+    simMode      = true;
+    simPaused    = true;
+    simStartReal = performance.now();
+    simStartEff  = Date.now();
+    playBtn.textContent = "▶ Play Simulation";
+    playBtn.classList.remove("playing");
+    simTimeEl.style.display = "block";
+    simTimeEl.textContent   = "Paused — " + n + " objects loaded";
+
+    csvResult.className   = "csv-status success";
+    csvResult.textContent = `✓ ${n} object${n === 1 ? "" : "s"} loaded, ${p} path${p === 1 ? "" : "s"} predicted. Press ▶ to simulate.`;
+  } catch (err) {
+    csvResult.className   = "csv-status error";
+    csvResult.textContent = "✗ " + err.message;
+  }
+}
+
 // ── Auto-load on page start ───────────────────────────────────────────────────
 (function init() {
   const now   = new Date();

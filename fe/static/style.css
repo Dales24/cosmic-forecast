@@ -338,6 +338,132 @@ input[type="submit"]:hover { filter: brightness(1.08); }
   transition: width 0.4s ease;
 }
 
+/* ── Image upload classifier ─────────────────────────────────────────────────── */
+.section-divider {
+  border: none;
+  border-top: 1px solid rgba(120, 160, 255, 0.15);
+  margin: 1.25rem 0;
+}
+
+.upload-title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8eb4ff;
+  margin-bottom: 0.75rem;
+}
+
+.upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.25rem 1rem;
+  border: 1.5px dashed rgba(120, 160, 255, 0.35);
+  border-radius: 10px;
+  background: rgba(2, 6, 18, 0.5);
+  color: #7a9acc;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: center;
+}
+
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: #6ea0ff;
+  background: rgba(60, 90, 180, 0.1);
+  color: #dce6ff;
+}
+
+.upload-icon { font-size: 1.6rem; line-height: 1; }
+
+.upload-link {
+  color: #6ea0ff;
+  text-decoration: underline;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: inherit;
+  display: inline;
+  margin-bottom: 0;
+}
+
+.upload-preview-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-top: 0.75rem;
+}
+
+.upload-preview-img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  flex-shrink: 0;
+}
+
+.upload-class-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-class-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e4eeff;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-conf-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: #c8d8f8;
+  margin-top: 0.5rem;
+}
+
+.upload-csv-hint {
+  font-size: 0.78rem;
+  color: #5a7099;
+  line-height: 1.55;
+  margin-bottom: 0.65rem;
+}
+
+.upload-csv-hint code {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.76rem;
+  color: #8eb4ff;
+  background: rgba(60, 100, 200, 0.12);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+.csv-status {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.csv-status.success {
+  background: rgba(0, 200, 100, 0.08);
+  border: 1px solid rgba(0, 200, 100, 0.28);
+  color: #7ee787;
+}
+
+.csv-status.error {
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid rgba(255, 80, 80, 0.28);
+  color: #ff7675;
+}
+
 @media (max-width: 900px) {
   body { overflow: auto; }
   .overlay { grid-template-columns: 1fr; padding: 1rem; }

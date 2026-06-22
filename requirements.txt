@@ -9,3 +9,4 @@ h5py
 Pillow
 requests
 sgp4
+python-multipart
