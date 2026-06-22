@@ -1,7 +1,7 @@
-# earth_predictions
+# cosmic_forcast
 A prediction system based on NASA earth data
 
-This project aims to train a model on NASA data for areas with wildfires. The system takes in data of locations with and without fires and the hours leading up to those events. The goal is to compare model and algorithm accuracy, and potentially use ensemble methods to estimate probabilities.
+This project aims to train a model on NASA data for predicting space objects and their trajectory. The goal is to compare model and algorithm accuracy, and potentially use ensemble methods to estimate probabilities.
 
 ## Demo
 
