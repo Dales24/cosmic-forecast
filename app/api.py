@@ -1,7 +1,9 @@
 import sys
 import os
+from datetime import datetime, timezone
 
 import numpy as np
+import requests as _requests
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +31,53 @@ def _get_cnn():
     return _cnn_model
 
 
+# ── TLE position propagation ──────────────────────────────────────────────────
+_NORM_KM = 42164.0   # GEO distance — normalises LEO at ~0.16, GPS at ~0.63
+
+
+def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[dict]:
+    try:
+        from sgp4.api import Satrec, jday as sgp4_jday
+    except ImportError:
+        return []
+
+    lines = [ln.strip() for ln in tle_text.splitlines() if ln.strip()]
+    results: list[dict] = []
+    i = 0
+    while i < len(lines) and len(results) < limit:
+        if (
+            i + 2 < len(lines)
+            and lines[i + 1].startswith("1 ")
+            and lines[i + 2].startswith("2 ")
+        ):
+            name, l1, l2 = lines[i], lines[i + 1], lines[i + 2]
+            try:
+                sat = Satrec.twoline2rv(l1, l2)
+                jd, fr = sgp4_jday(
+                    dt.year, dt.month, dt.day,
+                    dt.hour, dt.minute,
+                    dt.second + dt.microsecond / 1e6,
+                )
+                e, r, v = sat.sgp4(jd, fr)
+                if e == 0 and r:
+                    results.append({
+                        "id":      l1[2:7].strip(),
+                        "name":    name,
+                        "kind":    kind,
+                        "x_norm":  r[0] / _NORM_KM,
+                        "y_norm":  r[1] / _NORM_KM,
+                        "vx_norm": v[0] / _NORM_KM,
+                        "vy_norm": v[1] / _NORM_KM,
+                        "source":  "celestrak",
+                    })
+            except Exception:
+                pass
+            i += 3
+        else:
+            i += 1
+    return results
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 class ForecastObject(BaseModel):
     id: int
@@ -40,6 +89,60 @@ class ForecastRequest(BaseModel):
 
 
 # ── API routes ────────────────────────────────────────────────────────────────
+@app.get("/api/scene")
+def get_scene(datetime_str: str | None = None, limit: int = 15):
+    if datetime_str:
+        try:
+            dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+        except ValueError:
+            dt = datetime.now(timezone.utc)
+    else:
+        dt = datetime.now(timezone.utc)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    objects: list[dict] = []
+
+    # Space stations (ISS etc.)
+    try:
+        resp = _requests.get(
+            "https://celestrak.org/pub/TLE/stations.txt", timeout=8
+        )
+        resp.raise_for_status()
+        objects.extend(_propagate_tles(resp.text, dt, limit=3, kind="iss"))
+    except Exception:
+        pass
+
+    # Active satellites (fill remaining slots)
+    remaining = max(0, limit - len(objects))
+    if remaining > 0:
+        try:
+            resp = _requests.get(
+                "https://celestrak.org/pub/TLE/active.txt", timeout=8
+            )
+            resp.raise_for_status()
+            objects.extend(
+                _propagate_tles(resp.text, dt, limit=remaining, kind="satellite")
+            )
+        except Exception:
+            pass
+
+    # Unidentified — position intentionally unknown
+    objects.append({
+        "id":      "UNIDENTIFIED-1",
+        "name":    "Unidentified \U0001f47d",
+        "kind":    "ufo",
+        "x_norm":  0.28,
+        "y_norm":  -0.20,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "source":  "unknown",
+    })
+
+    return {"datetime": dt.isoformat(), "objects": objects}
+
+
 @app.get("/api/objects/{object_slug}")
 def get_objects(object_slug: str, date: str | None = None, limit: int = 20):
     from app.data_parser import get_data

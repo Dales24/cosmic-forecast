@@ -78,9 +78,11 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Usage
 
-1. **Enter sky coordinates** — Right Ascension, Declination, and an observation date, then click **Load Scene**. The canvas freezes orbital positions at that date.
-2. **Click any object** — the panel shows its CNN classification, confidence score, and current coordinates.
-3. **Press ▶ Play Simulation** — fetches ML-predicted trajectories and fast-forwards the scene at 200× real time, overlaying dashed forecast paths for each object.
+1. **Load a scene** — Enter optional RA/Dec and a date + time (defaults to now), then click **Load Scene**. Real objects are fetched from CelesTrak and positioned using sgp4 TLE propagation. The map starts frozen.
+2. **Navigate** — drag to pan, scroll to zoom. Objects stay frozen until Play is pressed.
+3. **Filter by type** — click any row in the legend to isolate that object kind. Click **All Objects** to reset the filter.
+4. **Click any object** — the panel shows its real name, data source, velocity, CNN classification, and orbital coordinates.
+5. **Press ▶ Play Simulation** — fetches ML-predicted trajectories and fast-forwards at 200× real time, advancing positions using real velocities and overlaying dashed forecast paths.
 
 ## Testing
 

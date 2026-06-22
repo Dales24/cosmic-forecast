@@ -7,3 +7,5 @@ pandas
 earthaccess
 h5py
 Pillow
+requests
+sgp4

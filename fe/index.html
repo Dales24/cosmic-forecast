@@ -15,12 +15,8 @@
     <div class="left-col">
       <div class="map-legend">
         <h2>Orbital Map</h2>
-        <ul>
-          <li class="earth">Earth (center)</li>
-          <li class="orbit">Orbital paths</li>
-          <li class="object">Tracked objects</li>
-          <li class="debris">Debris &amp; NEOs</li>
-          <li class="ufo">Unidentified 👽</li>
+        <ul id="legend-list">
+          <!-- populated dynamically by app.js -->
         </ul>
       </div>
 
@@ -36,7 +32,7 @@
       <!-- Default: forecast form -->
       <div id="form-view">
         <h1>Cosmic Forecast</h1>
-        <p class="subtitle">Enter sky coordinates and a date to load the orbital scene, then click Play to simulate.</p>
+        <p class="subtitle">Enter sky coordinates and a date/time to load live objects, then click Play to simulate.</p>
 
         <form id="scene-form">
           <div class="coord-row">
@@ -50,8 +46,8 @@
             </div>
           </div>
 
-          <label for="obs_date">Observation Date</label>
-          <input id="obs_date" type="date" name="obs_date">
+          <label for="obs_datetime">Observation Date &amp; Time (UTC)</label>
+          <input id="obs_datetime" type="datetime-local" name="obs_datetime">
 
           <input type="submit" value="Load Scene">
         </form>
@@ -62,7 +58,7 @@
       <!-- Object detail view (shown on click) -->
       <div id="obj-view">
         <div class="obj-header">
-          <div class="obj-title" id="obj-title">Object #1</div>
+          <div class="obj-title" id="obj-title">Object</div>
           <button class="back-btn" onclick="hideObjectInfo()">&#8592; Back</button>
         </div>
 
@@ -103,17 +99,17 @@
         </div>
 
         <div class="obj-section">
-          <div class="obj-section-title">Orbit</div>
+          <div class="obj-section-title">Details</div>
           <div class="obj-row">
-            <span class="key">Orbit index</span>
+            <span class="key">Source</span>
             <span class="val" id="obj-orbit">&#8212;</span>
           </div>
           <div class="obj-row">
-            <span class="key">Radius</span>
+            <span class="key">Velocity</span>
             <span class="val" id="obj-radius">&#8212;</span>
           </div>
           <div class="obj-row">
-            <span class="key">Kind</span>
+            <span class="key">Type</span>
             <span class="val" id="obj-kind">&#8212;</span>
           </div>
         </div>
