@@ -1,7 +1,7 @@
 pandas
-tensorflow
+tensorflow-cpu
 numpy
-scikit-learn
+
 Flask
 earthaccess
 h5py

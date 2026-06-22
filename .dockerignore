@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.tox
+.pre-commit-config.yaml
+training_data
+models
+*.md

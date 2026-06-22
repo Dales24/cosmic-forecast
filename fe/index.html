@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cosmic Forecast</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <canvas id="space-map" aria-label="Space orbital map"></canvas>
+
+  <div class="overlay">
+
+    <!-- Left column: legend + play controls -->
+    <div class="left-col">
+      <div class="map-legend">
+        <h2>Orbital Map</h2>
+        <ul>
+          <li class="earth">Earth (center)</li>
+          <li class="orbit">Orbital paths</li>
+          <li class="object">Tracked objects</li>
+          <li class="debris">Debris &amp; NEOs</li>
+        </ul>
+      </div>
+
+      <div class="controls">
+        <button id="play-btn">&#9654; Play Simulation</button>
+        <div id="sim-time">T+0h 00m 00s</div>
+      </div>
+    </div>
+
+    <!-- Right column: form / object detail panel -->
+    <div class="panel">
+
+      <!-- Default: forecast form -->
+      <div id="form-view">
+        <h1>Cosmic Forecast</h1>
+        <p class="subtitle">Enter sky coordinates and a date to load the orbital scene, then click Play to simulate.</p>
+
+        <form id="scene-form">
+          <div class="coord-row">
+            <div>
+              <label for="ra">Right Ascension</label>
+              <input id="ra" type="text" name="ra" placeholder="e.g. 83.82°">
+            </div>
+            <div>
+              <label for="dec">Declination</label>
+              <input id="dec" type="text" name="dec" placeholder="e.g. -5.39°">
+            </div>
+          </div>
+
+          <label for="obs_date">Observation Date</label>
+          <input id="obs_date" type="date" name="obs_date">
+
+          <input type="submit" value="Load Scene">
+        </form>
+
+        <div id="scene-result"></div>
+      </div>
+
+      <!-- Object detail view (shown on click) -->
+      <div id="obj-view">
+        <div class="obj-header">
+          <div class="obj-title" id="obj-title">Object #1</div>
+          <button class="back-btn" onclick="hideObjectInfo()">&#8592; Back</button>
+        </div>
+
+        <div class="obj-section">
+          <div class="obj-section-title">Classification</div>
+          <div class="obj-row">
+            <span class="key">Class</span>
+            <span class="val" id="obj-class">&#8212;</span>
+          </div>
+          <div id="obj-group-wrap" style="margin-top:0.35rem"></div>
+          <div class="obj-row" style="margin-top:0.5rem">
+            <span class="key">Confidence</span>
+            <span class="val" id="obj-conf">&#8212;</span>
+          </div>
+          <div class="conf-bar-wrap">
+            <div class="conf-bar" id="conf-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="obj-section">
+          <div class="obj-section-title">Coordinates</div>
+          <div class="obj-row">
+            <span class="key">X offset</span>
+            <span class="val" id="obj-x">&#8212;</span>
+          </div>
+          <div class="obj-row">
+            <span class="key">Y offset</span>
+            <span class="val" id="obj-y">&#8212;</span>
+          </div>
+          <div class="obj-row">
+            <span class="key">Distance</span>
+            <span class="val" id="obj-dist">&#8212;</span>
+          </div>
+          <div class="obj-row">
+            <span class="key">Azimuth</span>
+            <span class="val" id="obj-az">&#8212;</span>
+          </div>
+        </div>
+
+        <div class="obj-section">
+          <div class="obj-section-title">Orbit</div>
+          <div class="obj-row">
+            <span class="key">Orbit index</span>
+            <span class="val" id="obj-orbit">&#8212;</span>
+          </div>
+          <div class="obj-row">
+            <span class="key">Radius</span>
+            <span class="val" id="obj-radius">&#8212;</span>
+          </div>
+          <div class="obj-row">
+            <span class="key">Kind</span>
+            <span class="val" id="obj-kind">&#8212;</span>
+          </div>
+        </div>
+
+        <p class="hint">Press <strong>&#9654; Play Simulation</strong> to fast-forward paths and see ML-predicted trajectories.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
