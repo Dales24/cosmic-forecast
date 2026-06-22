@@ -32,60 +32,60 @@ def _make_track(positions, t_start=0.0, dt=1.0, cls="satellite"):
 def test_kalman_state_from_single_detection():
     track = _make_track([(1.0, 2.0)])
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
-    assert state.x[0] == pytest.approx(1.0)
-    assert state.x[1] == pytest.approx(2.0)
+    assert state.state[0] == pytest.approx(1.0)
+    assert state.state[1] == pytest.approx(2.0)
 
 
 def test_kalman_state_velocity_from_two_detections():
     track = _make_track([(0.0, 0.0), (1.0, 2.0)], dt=1.0)
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
     # velocity estimate should be ~(1, 2) from constant-velocity model
-    assert state.x[2] == pytest.approx(1.0, abs=0.5)
-    assert state.x[3] == pytest.approx(2.0, abs=0.5)
+    assert state.state[2] == pytest.approx(1.0, abs=0.5)
+    assert state.state[3] == pytest.approx(2.0, abs=0.5)
 
 
 def test_kalman_state_covariance_is_positive_definite():
     track = _make_track([(0.0, 0.0), (1.0, 0.0)])
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
-    eigvals = np.linalg.eigvals(state.P)
+    eigvals = np.linalg.eigvals(state.covariance)
     assert np.all(eigvals > 0)
 
 
 def test_kalman_state_predict_advances_position():
     track = _make_track([(0.0, 0.0), (1.0, 0.0)])
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
-    x0 = state.x.copy()
+    x0 = state.state.copy()
     state.predict(dt=1.0)
     # Position should have changed
-    assert state.x[0] != x0[0] or state.x[1] != x0[1]
+    assert state.state[0] != x0[0] or state.state[1] != x0[1]
 
 
 def test_kalman_state_predict_increases_covariance():
     track = _make_track([(0.0, 0.0), (1.0, 0.0)])
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
-    trace_before = np.trace(state.P)
+    trace_before = np.trace(state.covariance)
     state.predict(dt=1.0)
-    assert np.trace(state.P) >= trace_before
+    assert np.trace(state.covariance) >= trace_before
 
 
 def test_kalman_state_update_moves_toward_measurement():
     track = _make_track([(0.0, 0.0), (1.0, 0.0)])
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
     state.predict(dt=1.0)
-    predicted_x = state.x[0]
+    predicted_x = state.state[0]
     measurement = np.array([predicted_x + 5.0, 0.0])
     state.update(measurement)
     # State should have shifted toward the measurement
-    assert state.x[0] > predicted_x
+    assert state.state[0] > predicted_x
 
 
 def test_kalman_state_update_reduces_covariance():
     track = _make_track([(0.0, 0.0), (1.0, 0.0)])
     state = _KalmanState.from_track(track, process_noise=0.01, measurement_noise=0.1)
     state.predict(dt=1.0)
-    trace_before = np.trace(state.P)
+    trace_before = np.trace(state.covariance)
     state.update(np.array([2.0, 0.0]))
-    assert np.trace(state.P) < trace_before
+    assert np.trace(state.covariance) < trace_before
 
 
 # ── KalmanRefiner ─────────────────────────────────────────────────────────────
