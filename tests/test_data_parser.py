@@ -115,7 +115,9 @@ def _jpl_response(data=None):
     resp.raise_for_status = MagicMock()
     resp.json.return_value = {
         "fields": ["des", "cd", "dist", "v_rel"],
-        "data": data or [["2024 XY1", "2024-01-15", "0.05", "12.3"]],
+        "data": (
+            data if data is not None else [["2024 XY1", "2024-01-15", "0.05", "12.3"]]
+        ),
     }
     return resp
 

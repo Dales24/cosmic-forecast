@@ -14,7 +14,7 @@ def test_object_class_registry_matches_plan():
     assert "Asteroid" in names
     assert "International Space Station" in names
     assert "Variable Star" in names
-    assert NUM_CLASSES == 13
+    assert NUM_CLASSES == 14
     assert SLUG_TO_INDEX["iss"] == names.index("International Space Station")
 
 

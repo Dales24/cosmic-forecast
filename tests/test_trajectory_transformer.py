@@ -55,21 +55,21 @@ def test_pad_preserves_last_point():
 
 def test_normalize_last_xy_becomes_zero():
     pts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 1.0], [3.0, 5.0, 2.0]])
-    normed, origin = _normalize_sequence(pts)
+    normed, origin, _ = _normalize_sequence(pts)
     assert normed[-1, 0] == pytest.approx(0.0)
     assert normed[-1, 1] == pytest.approx(0.0)
 
 
 def test_normalize_returns_origin():
     pts = np.array([[0.0, 0.0, 0.0], [3.0, 5.0, 1.0]])
-    _, origin = _normalize_sequence(pts)
+    _, origin, _ = _normalize_sequence(pts)
     assert origin[0] == pytest.approx(3.0)
     assert origin[1] == pytest.approx(5.0)
 
 
 def test_normalize_time_scaled():
     pts = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 2.0]])
-    normed, _ = _normalize_sequence(pts)
+    normed, _, _ = _normalize_sequence(pts)
     # Time differences should be uniform unit steps
     diffs = np.diff(normed[:, 2])
     assert np.allclose(diffs, diffs[0])
@@ -77,7 +77,7 @@ def test_normalize_time_scaled():
 
 def test_normalize_single_point():
     pts = np.array([[5.0, 7.0, 100.0]])
-    normed, origin = _normalize_sequence(pts)
+    normed, origin, _ = _normalize_sequence(pts)
     assert normed[0, 0] == pytest.approx(0.0)
     assert normed[0, 1] == pytest.approx(0.0)
     assert origin[0] == pytest.approx(5.0)

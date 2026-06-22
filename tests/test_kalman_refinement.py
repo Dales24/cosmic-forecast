@@ -12,7 +12,7 @@ from app.kalman_refinement import KalmanRefiner, _KalmanState
 
 def _make_track(positions, t_start=0.0, dt=1.0, cls="satellite"):
     """Build a Track from a list of (x, y) positions."""
-    track = Track(track_id=0, object_class=cls)
+    track = Track(track_id=0)
     for i, (x, y) in enumerate(positions):
         d = Detection(
             frame_id=i,
@@ -20,7 +20,7 @@ def _make_track(positions, t_start=0.0, dt=1.0, cls="satellite"):
             x=x,
             y=y,
             patch=np.zeros((64, 64, 3), dtype=np.uint8),
-            classification=cls,
+            classification={"class": cls},
         )
         track.detections.append(d)
     return track

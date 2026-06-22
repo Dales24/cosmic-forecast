@@ -25,7 +25,7 @@ def test_num_classes_matches_object_classes():
 
 
 def test_total_class_count():
-    assert NUM_CLASSES == 13
+    assert NUM_CLASSES == 14
 
 
 def test_natural_objects_count():
