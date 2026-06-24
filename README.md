@@ -69,10 +69,11 @@ Open [http://localhost:8080](http://localhost:8080).
 ### Local
 
 ```bash
-pyenv virtualenv 3.12.3 cosmic && pyenv local cosmic
-pip install -r requirements.txt
-uvicorn app.api:app --reload
+uv sync
+uv run uvicorn app.api:app --reload
 ```
+
+> Requires [uv](https://docs.astral.sh/uv/). `uv sync` creates `.venv` from `uv.lock` and fetches Python 3.12 automatically.
 
 Open [http://localhost:8000](http://localhost:8000).
 
@@ -87,7 +88,7 @@ Open [http://localhost:8000](http://localhost:8000).
 ## Testing
 
 ```bash
-pytest
+uv run pytest --cov=. --cov-fail-under=80
 ```
 
 ## Training
@@ -95,5 +96,5 @@ pytest
 Organize labelled image patches into subdirectories named by object slug (see `app/object_classes.py`) then run:
 
 ```bash
-python scripts/train_object_classifier.py
+uv run python scripts/train_object_classifier.py
 ```

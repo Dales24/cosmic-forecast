@@ -6,7 +6,7 @@ Guidance for working in this repo. These apply to every change.
 
 - **Backend:** Python 3.12, FastAPI, TensorFlow/NumPy/Pandas (`app/`)
 - **Frontend:** vanilla JS SPA, canvas rendering (`fe/`)
-- **Tooling:** black + flake8 (Python), pytest + tox (`py312`), pre-commit
+- **Tooling:** uv (env + deps, Python 3.12), black + flake8, pytest + coverage, pre-commit
 
 ## 1. Readable, not clever
 
@@ -28,7 +28,7 @@ Guidance for working in this repo. These apply to every change.
 - Think through the edges before writing: empty input, single element, missing/NaN data, network failure from the data sources (CelesTrak / JPL / SIMBAD), malformed uploads.
 - External data fetchers must handle timeouts and bad responses gracefully — never let one source failure crash the pipeline.
 - Every behavioral change ships with a test. New `app/` logic → a `tests/` case; new `fe/` logic → a `fe/tests/` case.
-- Coverage must stay **≥ 80%** (`tox` enforces `--cov-fail-under=80`). Run tests before claiming done.
+- Coverage must stay **≥ 80%** (`uv run pytest --cov-fail-under=80`, enforced on push). Run tests before claiming done.
 - Cover the failure path, not just the happy path.
 
 ## 4. Follow the linter

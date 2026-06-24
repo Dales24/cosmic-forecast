@@ -1,6 +1,0 @@
-flake8
-black
-pre-commit
-pytest
-tox
-pip-tools

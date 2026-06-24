@@ -4,7 +4,7 @@ __pycache__
 **/__pycache__
 *.pyc
 *.pyo
-.tox
+.venv
 .pre-commit-config.yaml
 training_data
 models
