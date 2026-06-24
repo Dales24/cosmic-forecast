@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,9 @@ from app.object_classes import (
 
 PATCH_SIZE = (64, 64)
 DEFAULT_MODEL_DIR = Path("models/object_classifier")
+DEFAULT_ARCHIVE_DIR = Path("models/archive")
+MODEL_FILENAME = "model.keras"
+METADATA_FILENAME = "metadata.json"
 
 
 def create_cnn_model(
@@ -169,24 +173,69 @@ def predict_patch(model: tf.keras.Model, patch: np.ndarray) -> dict:
     }
 
 
-def save_model(
-    model: tf.keras.Model, model_dir: str | Path = DEFAULT_MODEL_DIR
-) -> Path:
-    """Persist model weights and class metadata."""
-    model_dir = Path(model_dir)
-    model_dir.mkdir(parents=True, exist_ok=True)
-    model.save(model_dir / "model.keras")
+def _write_model(model: tf.keras.Model, target_dir: Path) -> Path:
+    """Write the model weights and class metadata into `target_dir`."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    model.save(target_dir / MODEL_FILENAME)
     metadata = {
         "patch_size": list(PATCH_SIZE),
         "class_names": CLASS_NAMES,
         "class_slugs": CLASS_SLUGS,
         "class_groups": CLASS_GROUPS,
     }
-    (model_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
-    return model_dir
+    (target_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2))
+    return target_dir
+
+
+def save_model(
+    model: tf.keras.Model,
+    model_dir: str | Path = DEFAULT_MODEL_DIR,
+    archive: bool = False,
+    archive_dir: str | Path = DEFAULT_ARCHIVE_DIR,
+) -> Path:
+    """Persist the classifier; optionally keep a timestamped archived copy.
+
+    The primary copy at `model_dir` is always overwritten (latest model). When
+    `archive` is set, a second copy is written under `archive_dir/<timestamp>/`
+    so prior runs are never lost and can be reloaded later.
+    """
+    saved = _write_model(model, Path(model_dir))
+    if archive:
+        # Microseconds keep back-to-back runs from colliding; lexical sort = newest last.
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S_%f")
+        _write_model(model, Path(archive_dir) / stamp)
+    return saved
+
+
+def list_archived_models(archive_dir: str | Path = DEFAULT_ARCHIVE_DIR) -> list[Path]:
+    """Return archived model directories, newest first."""
+    archive_dir = Path(archive_dir)
+    if not archive_dir.exists():
+        return []
+    archives = [p for p in archive_dir.iterdir() if (p / MODEL_FILENAME).exists()]
+    return sorted(archives, reverse=True)
 
 
 def load_model(model_dir: str | Path = DEFAULT_MODEL_DIR) -> tf.keras.Model:
     """Load a saved classifier."""
     model_dir = Path(model_dir)
-    return tf.keras.models.load_model(model_dir / "model.keras")
+    return tf.keras.models.load_model(model_dir / MODEL_FILENAME)
+
+
+def load_archived_model(
+    name: str | None = None,
+    archive_dir: str | Path = DEFAULT_ARCHIVE_DIR,
+) -> tf.keras.Model:
+    """Load an archived classifier by directory name, or the newest if `name` is None."""
+    archive_dir = Path(archive_dir)
+    if name is not None:
+        target = archive_dir / name
+        if not (target / MODEL_FILENAME).exists():
+            raise FileNotFoundError(
+                f"No archived model named {name!r} in {archive_dir}"
+            )
+        return load_model(target)
+    archives = list_archived_models(archive_dir)
+    if not archives:
+        raise FileNotFoundError(f"No archived models found in {archive_dir}")
+    return load_model(archives[0])

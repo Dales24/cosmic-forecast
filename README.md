@@ -14,7 +14,7 @@ app/
   trajectory_transformer.py  Transformer model for trajectory forecasting
   kalman_refinement.py       Kalman filter for position + uncertainty estimation
   pipeline.py                End-to-end: CNN → Track → Transformer → Kalman
-fe/
+front_end/
   index.html                 Static SPA (no server-side rendering)
   static/
     style.css

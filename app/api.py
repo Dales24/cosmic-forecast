@@ -15,7 +15,7 @@ _root = os.path.dirname(_here)
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-_fe = os.path.join(_root, "fe")
+_front_end = os.path.join(_root, "front_end")
 
 app = FastAPI(title="Cosmic Forecast")
 
@@ -275,12 +275,14 @@ def api_forecast(body: ForecastRequest):
 
 
 # ── Static files + SPA fallback ───────────────────────────────────────────────
-app.mount("/static", StaticFiles(directory=os.path.join(_fe, "static")), name="static")
+app.mount(
+    "/static", StaticFiles(directory=os.path.join(_front_end, "static")), name="static"
+)
 
 
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(_fe, "index.html"))
+    return FileResponse(os.path.join(_front_end, "index.html"))
 
 
 if __name__ == "__main__":

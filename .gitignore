@@ -209,6 +209,6 @@ models/
 data/
 
 # Node / frontend
-fe/node_modules/
-fe/package-lock.json
-fe/coverage/
+front_end/node_modules/
+front_end/package-lock.json
+front_end/coverage/

@@ -1,5 +1,5 @@
 {
-  "name": "cosmic-forecast-fe",
+  "name": "cosmic-forecast-frontend",
   "private": true,
   "scripts": {
     "test": "jest --forceExit"

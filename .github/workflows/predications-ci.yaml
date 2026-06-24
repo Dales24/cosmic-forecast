@@ -2,12 +2,14 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -19,7 +21,23 @@ jobs:
         run: uv sync --frozen
       - name: Lint
         run: |
-          uv run black --check app/ tests/
-          uv run flake8 app/ tests/
+          uv run black --check app/ tests/ scripts/
+          uv run flake8 app/ tests/ scripts/
       - name: Test with coverage
         run: uv run pytest --cov=. --cov-fail-under=80
+
+  # Validate the Docker image builds on version tags, only after tests pass.
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: cosmic-forecast:${{ github.ref_name }}
