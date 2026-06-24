@@ -1,6 +1,7 @@
 import sys
 import os
 from datetime import datetime, timezone
+from math import cos, pi, sin
 
 import numpy as np
 import requests as _requests
@@ -34,6 +35,7 @@ def _get_cnn():
 
 # ── TLE position propagation ──────────────────────────────────────────────────
 _NORM_KM = 42164.0  # GEO distance — normalises LEO at ~0.16, GPS at ~0.63
+_CELESTRAK_GP = "https://celestrak.org/NORAD/elements/gp.php"
 
 
 def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[dict]:
@@ -84,6 +86,88 @@ def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[
     return results
 
 
+# ── Catalog objects (JPL / SIMBAD) ────────────────────────────────────────────
+# These sources don't share the TLE orbital frame, so scene positions are
+# symbolic, not astrometric (see docs/known-issues.md).
+def _stable_angle(seed: str) -> float:
+    """Deterministic angle in radians from a string (Python's hash() is salted)."""
+    return (sum(ord(char) for char in seed) % 360) * pi / 180.0
+
+
+def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
+    """Near-Earth approaches (JPL CAD) as scene objects for the user's date.
+
+    CAD gives approach distance/velocity but no on-sky position, so each object
+    is placed symbolically: distance sets an outer-ring radius, a stable hash of
+    the designation sets the angle.
+    """
+    from app.data_parser import fetch_jpl
+
+    try:
+        records = fetch_jpl(date_str, limit)
+    except Exception:
+        return []
+
+    objects: list[dict] = []
+    for record in records:
+        designation = str(record.get("des", "?"))
+        try:
+            dist_au = float(record.get("dist", 0.0))
+        except (TypeError, ValueError):
+            dist_au = 0.0
+        angle = _stable_angle(designation)
+        radius = 0.6 + min(dist_au / 0.2, 1.0) * 0.35  # 0.2 AU = CAD dist-max
+        objects.append(
+            {
+                "id": f"NEO-{designation}",
+                "name": designation,
+                "kind": "near_earth_object",
+                "x_norm": radius * cos(angle),
+                "y_norm": radius * sin(angle),
+                "vx_norm": 0.0,
+                "vy_norm": 0.0,
+                "source": "jpl",
+            }
+        )
+    return objects
+
+
+def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
+    """SIMBAD deep-space objects placed by sky coordinates (RA/Dec).
+
+    RA (0–360°) maps to x and Dec (−90–90°) to y. These objects are fixed over
+    the simulation's timescale, so velocity is zero.
+    """
+    from app.data_parser import fetch_simbad
+
+    try:
+        records = fetch_simbad(slug, limit)
+    except Exception:
+        return []
+
+    objects: list[dict] = []
+    for record in records:
+        try:
+            ra = float(record.get("ra"))
+            dec = float(record.get("dec"))
+        except (TypeError, ValueError):
+            continue
+        name = str(record.get("main_id", slug))
+        objects.append(
+            {
+                "id": f"{kind}-{name}",
+                "name": name,
+                "kind": kind,
+                "x_norm": (ra / 180.0 - 1.0) * 0.9,
+                "y_norm": (dec / 90.0) * 0.9,
+                "vx_norm": 0.0,
+                "vy_norm": 0.0,
+                "source": "simbad",
+            }
+        )
+    return objects
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 class ForecastObject(BaseModel):
     id: int
@@ -110,9 +194,11 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
 
     objects: list[dict] = []
 
-    # Space stations (ISS etc.)
+    # Space stations (ISS etc.). CelesTrak's legacy /pub/TLE/*.txt files now 403;
+    # the GP query API is the supported source.
+    stations_url = f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle"
     try:
-        resp = _requests.get("https://celestrak.org/pub/TLE/stations.txt", timeout=8)
+        resp = _requests.get(stations_url, timeout=8)
         resp.raise_for_status()
         objects.extend(_propagate_tles(resp.text, dt, limit=3, kind="iss"))
     except Exception:
@@ -121,14 +207,22 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
     # Active satellites (fill remaining slots)
     remaining = max(0, limit - len(objects))
     if remaining > 0:
+        active_url = f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle"
         try:
-            resp = _requests.get("https://celestrak.org/pub/TLE/active.txt", timeout=8)
+            resp = _requests.get(active_url, timeout=8)
             resp.raise_for_status()
             objects.extend(
                 _propagate_tles(resp.text, dt, limit=remaining, kind="satellite")
             )
         except Exception:
             pass
+
+    # Near-Earth objects (JPL CAD) — the user's date drives the approach window.
+    objects.extend(_jpl_scene_objects(dt.strftime("%Y-%m-%d"), limit=5))
+
+    # Deep-space catalog objects (SIMBAD) — static over the sim timescale.
+    objects.extend(_simbad_scene_objects("galaxy", "galaxy", limit=4))
+    objects.extend(_simbad_scene_objects("nebula", "nebula", limit=3))
 
     # Unidentified — position intentionally unknown
     objects.append(
