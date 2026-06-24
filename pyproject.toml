@@ -32,6 +32,9 @@ dev = [
 # Application, not a distributable package — skip the build step.
 [tool.uv]
 package = false
+# Copy installed files instead of hardlinking from the cache: hardlinks were
+# dropping numpy's bundled .dylibs (libgfortran/openblas) on macOS, breaking imports.
+link-mode = "copy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

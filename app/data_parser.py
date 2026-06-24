@@ -25,11 +25,17 @@ import requests
 _TIMEOUT = 10  # seconds per request
 
 # ── CelesTrak ─────────────────────────────────────────────────────────────────
+# CelesTrak retired the legacy /pub/TLE/*.txt files (now HTTP 403); use the GP
+# query API. There is no generic "debris" or "rocket-bodies" group, so debris is
+# sourced from a representative field (Cosmos 2251 collision fragments).
+_CELESTRAK_GP = "https://celestrak.org/NORAD/elements/gp.php"
 _CELESTRAK_URLS: dict[str, str] = {
-    "satellite": "https://celestrak.org/pub/TLE/active.txt",
-    "iss": "https://celestrak.org/pub/TLE/stations.txt",
-    "space_debris": "https://celestrak.org/pub/TLE/debris.txt",
-    "rocket_body": "https://celestrak.org/pub/TLE/rocket-bodies.txt",
+    "satellite": f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle",
+    "iss": f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle",
+    "space_debris": f"{_CELESTRAK_GP}?GROUP=cosmos-2251-debris&FORMAT=tle",
+    # No GP group for rocket bodies; an unknown group returns an empty TLE blob
+    # (parsed to []) rather than mislabeling debris as rocket bodies.
+    "rocket_body": f"{_CELESTRAK_GP}?GROUP=rocket-bodies&FORMAT=tle",
 }
 
 

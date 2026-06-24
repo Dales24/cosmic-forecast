@@ -1,6 +1,7 @@
 """Tests for all FastAPI endpoints in app/api.py."""
 
 import io
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -8,9 +9,31 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api import app, _propagate_tles
+from app.api import (
+    app,
+    _propagate_tles,
+    _jpl_scene_objects,
+    _simbad_scene_objects,
+    _stable_angle,
+)
 
 client = TestClient(app)
+
+
+@contextmanager
+def _offline_catalogs(requests_patch):
+    """Run a scene request with JPL/SIMBAD stubbed offline.
+
+    Scene assembly also calls data_parser.fetch_jpl/fetch_simbad; stub them so
+    tests never touch the real APIs. `requests_patch` controls the CelesTrak leg.
+    """
+    with (
+        requests_patch,
+        patch("app.data_parser.fetch_jpl", side_effect=Exception("offline")),
+        patch("app.data_parser.fetch_simbad", side_effect=Exception("offline")),
+    ):
+        yield
+
 
 # ── GET / ─────────────────────────────────────────────────────────────────────
 
@@ -140,8 +163,8 @@ def test_forecast_empty_objects_list():
 
 
 def test_scene_always_includes_ufo():
-    """UFO entry is appended even when CelesTrak calls fail."""
-    with patch("app.api._requests.get", side_effect=Exception("no network")):
+    """UFO entry is appended even when every data source fails."""
+    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
         r = client.get("/api/scene")
     assert r.status_code == 200
     kinds = [o["kind"] for o in r.json()["objects"]]
@@ -149,7 +172,7 @@ def test_scene_always_includes_ufo():
 
 
 def test_scene_ufo_has_required_fields():
-    with patch("app.api._requests.get", side_effect=Exception("no network")):
+    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
         r = client.get("/api/scene")
     ufo = next(o for o in r.json()["objects"] if o["kind"] == "ufo")
     for field in (
@@ -166,14 +189,14 @@ def test_scene_ufo_has_required_fields():
 
 
 def test_scene_accepts_datetime_str():
-    with patch("app.api._requests.get", side_effect=Exception("no network")):
+    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
         r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
     assert r.status_code == 200
     assert "2025-06-01" in r.json()["datetime"]
 
 
 def test_scene_invalid_datetime_falls_back():
-    with patch("app.api._requests.get", side_effect=Exception("no network")):
+    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
         r = client.get("/api/scene?datetime_str=not-a-date")
     assert r.status_code == 200  # falls back to now, no crash
 
@@ -188,12 +211,110 @@ def test_scene_includes_tle_objects_when_celestrak_responds():
     mock_resp.text = tle_text
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("app.api._requests.get", return_value=mock_resp):
+    with _offline_catalogs(patch("app.api._requests.get", return_value=mock_resp)):
         r = client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
 
     assert r.status_code == 200
     iss_objects = [o for o in r.json()["objects"] if o["kind"] == "iss"]
     assert len(iss_objects) >= 1
+
+
+def test_scene_passes_user_date_to_jpl():
+    """The UI datetime must reach JPL CAD as the approach-window start date."""
+    captured = {}
+
+    def fake_jpl(date, limit):
+        captured["date"] = date
+        return []
+
+    with (
+        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_jpl", side_effect=fake_jpl),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
+
+    assert r.status_code == 200
+    assert captured["date"] == "2025-06-01"
+
+
+def test_scene_includes_jpl_and_simbad_objects():
+    jpl_records = [{"des": "2024 XY1", "dist": "0.05"}]
+    simbad_records = [{"main_id": "M31", "ra": 10.68, "dec": 41.27}]
+
+    with (
+        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_jpl", return_value=jpl_records),
+        patch("app.data_parser.fetch_simbad", return_value=simbad_records),
+    ):
+        r = client.get("/api/scene")
+
+    objects = r.json()["objects"]
+    kinds = {o["kind"] for o in objects}
+    assert "near_earth_object" in kinds
+    assert "galaxy" in kinds and "nebula" in kinds
+    # Every catalog object carries the full scene-object schema.
+    for obj in objects:
+        for field in ("id", "name", "kind", "x_norm", "y_norm", "source"):
+            assert field in obj
+
+
+# ── Catalog scene-object helpers ──────────────────────────────────────────────
+
+
+def test_stable_angle_is_deterministic_and_in_range():
+    assert _stable_angle("2024 XY1") == _stable_angle("2024 XY1")
+    assert 0.0 <= _stable_angle("anything") < 2 * np.pi
+
+
+def test_jpl_scene_objects_placement_and_schema():
+    with patch(
+        "app.data_parser.fetch_jpl",
+        return_value=[{"des": "2024 XY1", "dist": "0.05"}],
+    ):
+        objs = _jpl_scene_objects("2025-06-01", limit=5)
+    assert len(objs) == 1
+    obj = objs[0]
+    assert obj["kind"] == "near_earth_object"
+    assert obj["source"] == "jpl"
+    # Symbolic placement lands inside the canvas (radius 0.6–0.95).
+    radius = (obj["x_norm"] ** 2 + obj["y_norm"] ** 2) ** 0.5
+    assert 0.6 <= radius <= 0.95
+
+
+def test_jpl_scene_objects_tolerates_missing_dist():
+    with patch(
+        "app.data_parser.fetch_jpl", return_value=[{"des": "BadRow", "dist": None}]
+    ):
+        objs = _jpl_scene_objects("2025-06-01", limit=5)
+    assert len(objs) == 1  # missing dist falls back to radius floor, no crash
+
+
+def test_jpl_scene_objects_empty_on_failure():
+    with patch("app.data_parser.fetch_jpl", side_effect=Exception("boom")):
+        assert _jpl_scene_objects("2025-06-01", limit=5) == []
+
+
+def test_simbad_scene_objects_maps_radec_to_canvas():
+    with patch(
+        "app.data_parser.fetch_simbad",
+        return_value=[{"main_id": "M31", "ra": 180.0, "dec": 0.0}],
+    ):
+        objs = _simbad_scene_objects("galaxy", "galaxy", limit=4)
+    assert len(objs) == 1
+    obj = objs[0]
+    assert obj["kind"] == "galaxy"
+    # RA 180 -> x 0, Dec 0 -> y 0.
+    assert obj["x_norm"] == pytest.approx(0.0)
+    assert obj["y_norm"] == pytest.approx(0.0)
+
+
+def test_simbad_scene_objects_skips_rows_without_coords():
+    with patch(
+        "app.data_parser.fetch_simbad",
+        return_value=[{"main_id": "NoCoords", "ra": None, "dec": None}],
+    ):
+        assert _simbad_scene_objects("galaxy", "galaxy", limit=4) == []
 
 
 # ── POST /api/upload/csv ──────────────────────────────────────────────────────

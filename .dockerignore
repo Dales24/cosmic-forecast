@@ -9,3 +9,9 @@ __pycache__
 training_data
 models
 *.md
+**/node_modules
+front_end/coverage
+tests
+docs
+claude
+.github
