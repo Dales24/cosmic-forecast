@@ -1,0 +1,33 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        additional_dependencies: []
+        # Ignore list lives in .flake8 so CI and pre-commit stay in sync.
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-yaml
+
+  # Coverage gate runs on push (not every commit) — needs the full suite,
+  # which is slow with TensorFlow. Runs in the uv-managed environment.
+  - repo: local
+    hooks:
+      - id: pytest-cov
+        name: pytest coverage >=80%
+        entry: uv run pytest --cov=. --cov-fail-under=80
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

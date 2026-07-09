@@ -1,0 +1,17 @@
+.git
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.venv
+.pre-commit-config.yaml
+training_data
+models
+*.md
+**/node_modules
+front_end/coverage
+tests
+docs
+claude
+.github

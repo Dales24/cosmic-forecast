@@ -1,0 +1,40 @@
+[project]
+name = "cosmic-forecast"
+version = "0.1.0"
+description = "Telescope object detection, classification, and trajectory forecasting pipeline."
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "aiofiles",
+    "numpy",
+    # 2.17+ dropped macOS x86_64 wheels; pin to the last cross-platform release.
+    "tensorflow-cpu==2.16.2",
+    "pandas",
+    "earthaccess",
+    "h5py",
+    "Pillow",
+    "requests",
+    "sgp4",
+    "python-multipart",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "httpx",  # required by fastapi/starlette TestClient in tests/test_api.py
+    "black==24.4.2",  # match the pinned pre-commit hook
+    "flake8==7.0.0",  # match the pinned pre-commit hook
+    "pre-commit",
+]
+
+# Application, not a distributable package — skip the build step.
+[tool.uv]
+package = false
+# Copy installed files instead of hardlinking from the cache: hardlinks were
+# dropping numpy's bundled .dylibs (libgfortran/openblas) on macOS, breaking imports.
+link-mode = "copy"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

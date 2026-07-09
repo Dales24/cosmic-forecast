@@ -1,0 +1,5 @@
+[flake8]
+# E203 / W503 conflict with black's formatting; the rest match the project's
+# long-standing tolerances (line length handled by black, unused imports/vars
+# permitted in tests and __init__ wiring).
+extend-ignore = F401,F821,F841,E501,E203,W503
