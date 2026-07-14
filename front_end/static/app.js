@@ -210,14 +210,81 @@ function _staticItem(cls, text) {
   return li;
 }
 
-// ── Stars ─────────────────────────────────────────────────────────────────────
+// ── Stars & backdrop ──────────────────────────────────────────────────────────
+// Star colours span the stellar temperature range (blue-white → yellow/orange)
+// so the field reads as real starlight, not flat grey.
+const STAR_COLORS = ["#ffffff", "#dbe6ff", "#cfe0ff", "#ffe6c0", "#ffcda0"];
+
+// The static sky (gradient, nebulae, Milky Way, faint stars) is pre-rendered once
+// per resize into an offscreen canvas and blitted each frame; only the brighter
+// foreground stars twinkle live. Cheap, and smooth.
+const backdrop = document.createElement("canvas");
+const bctx = backdrop.getContext("2d");
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function buildBackdrop(w, h) {
+  backdrop.width = w;
+  backdrop.height = h;
+  const b = bctx;
+
+  // Deep-space gradient.
+  const g = b.createRadialGradient(w * .5, h * .42, 0, w * .5, h * .42, Math.max(w, h) * .8);
+  g.addColorStop(0, "#0b1230");
+  g.addColorStop(0.5, "#050817");
+  g.addColorStop(1, "#010208");
+  b.fillStyle = g;
+  b.fillRect(0, 0, w, h);
+
+  // Faint diagonal Milky Way band.
+  b.save();
+  b.translate(w * .5, h * .5);
+  b.rotate(-0.5);
+  const mw = b.createLinearGradient(0, -h * .22, 0, h * .22);
+  mw.addColorStop(0, "rgba(130,150,225,0)");
+  mw.addColorStop(0.5, "rgba(150,165,235,0.10)");
+  mw.addColorStop(1, "rgba(130,150,225,0)");
+  b.fillStyle = mw;
+  b.fillRect(-w, -h * .22, w * 2, h * .44);
+  b.restore();
+
+  // Coloured nebula clouds for depth.
+  const clouds = [
+    { x: .22, y: .30, r: .42, c: "rgba(80,60,165,0.18)" },
+    { x: .78, y: .62, r: .50, c: "rgba(40,95,155,0.16)" },
+    { x: .55, y: .18, r: .34, c: "rgba(150,55,120,0.10)" },
+  ];
+  for (const c of clouds) {
+    const rg = b.createRadialGradient(c.x * w, c.y * h, 0, c.x * w, c.y * h, c.r * Math.max(w, h));
+    rg.addColorStop(0, c.c);
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    b.fillStyle = rg;
+    b.fillRect(0, 0, w, h);
+  }
+
+  // Dense field of faint background stars.
+  const count = Math.floor(w * h / 1400);
+  for (let i = 0; i < count; i++) {
+    b.fillStyle = `rgba(210,224,255,${0.15 + Math.random() * 0.5})`;
+    b.beginPath();
+    b.arc(Math.random() * w, Math.random() * h, Math.random() * 0.9 + 0.2, 0, Math.PI * 2);
+    b.fill();
+  }
+}
+
 function initStars(n) {
   stars.length = 0;
   for (let i = 0; i < n; i++) {
     stars.push({
       x: Math.random(), y: Math.random(),
-      r: Math.random() * 1.4 + 0.3,
+      r: Math.random() * 1.3 + 0.5,
       tw: Math.random() * Math.PI * 2,
+      sp: 0.008 + Math.random() * 0.02,
+      color: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
+      glint: Math.random() < 0.1,
     });
   }
 }
@@ -225,35 +292,90 @@ function initStars(n) {
 // ── Draw helpers ──────────────────────────────────────────────────────────────
 function drawBackground() {
   const w = window.innerWidth, h = window.innerHeight;
-  const g = ctx.createRadialGradient(w*.5, h*.45, 0, w*.5, h*.45, Math.max(w,h)*.75);
-  g.addColorStop(0, "#0a1030");
-  g.addColorStop(0.45, "#050818");
-  g.addColorStop(1, "#010208");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(backdrop, 0, 0, w, h);
+
   for (const s of stars) {
-    const alpha = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(s.tw));
-    ctx.fillStyle = `rgba(220,230,255,${alpha})`;
-    ctx.beginPath();
-    ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-    ctx.fill();
-    s.tw += 0.015 + Math.random() * 0.01;
+    const tw    = 0.5 + 0.5 * Math.sin(s.tw);
+    const alpha = 0.45 + 0.55 * tw;
+    const x = s.x * w, y = s.y * h, r = s.r * (0.8 + 0.4 * tw);
+
+    // Brighter stars get a soft halo.
+    if (s.r > 1.1) {
+      const gr = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+      gr.addColorStop(0, hexA(s.color, alpha * 0.5));
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(x, y, r * 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.fillStyle = hexA(s.color, alpha);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+
+    // A few stars get a subtle diffraction glint.
+    if (s.glint) {
+      ctx.strokeStyle = hexA(s.color, alpha * 0.5);
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 3, y); ctx.lineTo(x + r * 3, y);
+      ctx.moveTo(x, y - r * 3); ctx.lineTo(x, y + r * 3);
+      ctx.stroke();
+    }
+    s.tw += s.sp;
   }
 }
 
 function drawEarth(cx, cy, scale) {
-  const r    = scale * 0.045;
-  const glow = ctx.createRadialGradient(cx, cy, r*.5, cx, cy, r*3);
-  glow.addColorStop(0, "rgba(77,163,255,0.35)");
-  glow.addColorStop(1, "rgba(77,163,255,0)");
+  const r = scale * 0.045;
+
+  // Outer atmosphere glow.
+  const glow = ctx.createRadialGradient(cx, cy, r * .9, cx, cy, r * 2.6);
+  glow.addColorStop(0, "rgba(90,170,255,0.35)");
+  glow.addColorStop(0.5, "rgba(70,140,255,0.12)");
+  glow.addColorStop(1, "rgba(70,140,255,0)");
   ctx.fillStyle = glow;
-  ctx.beginPath(); ctx.arc(cx, cy, r*3, 0, Math.PI*2); ctx.fill();
-  const eg = ctx.createRadialGradient(cx-r*.3, cy-r*.3, r*.2, cx, cy, r);
-  eg.addColorStop(0, "#7ec8ff"); eg.addColorStop(0.55, "#2b6cb0"); eg.addColorStop(1, "#0a2240");
+  ctx.beginPath(); ctx.arc(cx, cy, r * 2.6, 0, Math.PI * 2); ctx.fill();
+
+  // Ocean base, lit from the upper-left.
+  const eg = ctx.createRadialGradient(cx - r * .35, cy - r * .35, r * .15, cx, cy, r);
+  eg.addColorStop(0, "#8fd0ff"); eg.addColorStop(0.5, "#2f74c0"); eg.addColorStop(1, "#0a2038");
   ctx.fillStyle = eg;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = "rgba(140,200,255,0.5)"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+
+  // Surface detail, clipped to the globe.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+
+  // Continent hints.
+  ctx.fillStyle = "rgba(70,130,80,0.55)";
+  for (const [dx, dy, rr] of [[-.3, -.2, .45], [.25, .05, .5], [-.05, .35, .4], [.4, -.35, .3]]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + dx * r, cy + dy * r, rr * r, rr * r * 0.7, dx, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Day/night terminator — darken away from the sunlit side.
+  const term = ctx.createRadialGradient(cx - r * .5, cy - r * .5, r * .2, cx + r * .6, cy + r * .6, r * 1.8);
+  term.addColorStop(0, "rgba(2,6,16,0)");
+  term.addColorStop(0.6, "rgba(2,6,16,0.15)");
+  term.addColorStop(1, "rgba(2,6,16,0.8)");
+  ctx.fillStyle = term;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  // Specular highlight.
+  const spec = ctx.createRadialGradient(cx - r * .4, cy - r * .45, 0, cx - r * .4, cy - r * .45, r * .5);
+  spec.addColorStop(0, "rgba(255,255,255,0.5)");
+  spec.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = spec;
+  ctx.beginPath(); ctx.arc(cx - r * .4, cy - r * .45, r * .5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  // Thin bright atmosphere rim.
+  const rim = ctx.createRadialGradient(cx, cy, r * .92, cx, cy, r * 1.06);
+  rim.addColorStop(0, "rgba(150,210,255,0)");
+  rim.addColorStop(0.6, "rgba(150,210,255,0.35)");
+  rim.addColorStop(1, "rgba(150,210,255,0)");
+  ctx.fillStyle = rim;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 1.06, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawOrbitalPaths(cx, cy, scale) {
@@ -377,6 +499,7 @@ function resize() {
   canvas.style.width  = window.innerWidth  + "px";
   canvas.style.height = window.innerHeight + "px";
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  buildBackdrop(window.innerWidth, window.innerHeight);
 }
 
 window.addEventListener("resize", () => { resize(); initStars(320); });

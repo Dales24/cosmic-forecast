@@ -17,6 +17,10 @@ dependencies = [
     "requests",
     "sgp4",
     "python-multipart",
+    # Python 3.12 removed distutils from the stdlib; tensorflow 2.16 still imports
+    # it. setuptools ships the shim that makes `import distutils` work — but only
+    # versions < 74 still activate it standalone (newer ones dropped the hook).
+    "setuptools<74",
 ]
 
 [dependency-groups]

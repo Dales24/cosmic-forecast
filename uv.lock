@@ -284,6 +284,7 @@ dependencies = [
     { name = "pillow" },
     { name = "python-multipart" },
     { name = "requests" },
+    { name = "setuptools" },
     { name = "sgp4" },
     { name = "tensorflow-cpu" },
     { name = "uvicorn", extra = ["standard"] },
@@ -310,6 +311,7 @@ requires-dist = [
     { name = "pillow" },
     { name = "python-multipart" },
     { name = "requests" },
+    { name = "setuptools", specifier = "<74" },
     { name = "sgp4" },
     { name = "tensorflow-cpu", specifier = "==2.16.2" },
     { name = "uvicorn", extras = ["standard"] },
@@ -1204,11 +1206,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "82.0.1"
+version = "73.0.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4f/db/cfac1baf10650ab4d1c111714410d2fbb77ac5a616db26775db562c8fab2/setuptools-82.0.1.tar.gz", hash = "sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9", size = 1152316, upload-time = "2026-03-09T12:47:17.221Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/37/f4d4ce9bc15e61edba3179f9b0f763fc6d439474d28511b11f0d95bab7a2/setuptools-73.0.1.tar.gz", hash = "sha256:d59a3e788ab7e012ab2c4baed1b376da6366883ee20d7a5fc426816e3d7b1193", size = 2526506, upload-time = "2024-08-20T18:27:53.037Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/76/f789f7a86709c6b087c5a2f52f911838cad707cc613162401badc665acfe/setuptools-82.0.1-py3-none-any.whl", hash = "sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb", size = 1006223, upload-time = "2026-03-09T12:47:15.026Z" },
+    { url = "https://files.pythonhosted.org/packages/07/6a/0270e295bf30c37567736b7fca10167640898214ff911273af37ddb95770/setuptools-73.0.1-py3-none-any.whl", hash = "sha256:b208925fcb9f7af924ed2dc04708ea89791e24bde0d3020b27df0e116088b34e", size = 2346588, upload-time = "2024-08-20T18:27:50.018Z" },
 ]
 
 [[package]]
