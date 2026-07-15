@@ -383,10 +383,14 @@ function drawEarth(cx, cy, scale) {
 // objects, so they never enter hit-testing, forecasting, or the legend.
 // Positions are normalized scale-units from the scene centre.
 const PLANETS = [
-  { x:  .34, y: -.30, r: .024, hi: "#f0a878", mid: "#c65f38", lo: "#5c2415" },
-  { x: -.38, y:  .21, r: .046, hi: "#f2d9b0", mid: "#c79a63", lo: "#6d4626", bands: true },
-  { x:  .31, y:  .34, r: .030, hi: "#efe0b0", mid: "#c9ac6b", lo: "#7a6034", ring: "#d8c48f" },
-  { x: -.29, y: -.33, r: .020, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
+  { name: "Mercury", x:  .43, y: -.05, r: .013, hi: "#cdc6ba", mid: "#7d7367", lo: "#2e2a24", craters: true },
+  { name: "Venus",   x:  .35, y: -.29, r: .020, hi: "#f6ead0", mid: "#d9b978", lo: "#8a6d3a" },
+  { name: "Mars",    x:  .13, y: -.41, r: .016, hi: "#f0a878", mid: "#c65f38", lo: "#5c2415" },
+  { name: "Jupiter", x: -.40, y:  .23, r: .046, hi: "#f2d9b0", mid: "#c79a63", lo: "#6d4626", bands: true, spot: true },
+  { name: "Saturn",  x:  .33, y:  .34, r: .034, hi: "#efe0b0", mid: "#c9ac6b", lo: "#7a6034", bands: true, ring: "#d8c48f" },
+  { name: "Uranus",  x: -.34, y:  .41, r: .026, hi: "#cdeefb", mid: "#8fd0e6", lo: "#3f8fae", ring: "#a9d9e6" },
+  { name: "Neptune", x: -.45, y: -.02, r: .025, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
+  { name: "Pluto",   x:  .07, y:  .44, r: .010, hi: "#d8cbb8", mid: "#9c8b74", lo: "#4a4136", craters: true },
 ];
 
 // A lit sphere: highlight upper-left, shading toward the far edge.
@@ -417,6 +421,20 @@ function _planetBands(cx, cy, r) {
   }
 }
 
+// Impact craters for rocky bodies (Mercury, Pluto, the Moon).
+function _craters(cx, cy, r, color) {
+  ctx.fillStyle = color;
+  for (const [dx, dy, rr] of [[-.3, -.2, .22], [.25, .1, .28], [.05, .4, .18], [.4, -.3, .15], [-.35, .28, .16]]) {
+    ctx.beginPath(); ctx.arc(cx + dx * r, cy + dy * r, rr * r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// Jupiter's Great Red Spot.
+function _redSpot(cx, cy, r) {
+  ctx.fillStyle = "rgba(200,90,60,0.55)";
+  ctx.beginPath(); ctx.ellipse(cx + r * .28, cy + r * .18, r * .22, r * .14, 0, 0, Math.PI * 2); ctx.fill();
+}
+
 // A tilted ring; drawn once behind the planet and again (clipped low) in front.
 function _planetRing(cx, cy, r, color, front) {
   ctx.save();
@@ -442,11 +460,47 @@ function drawPlanets(cx, cy, scale) {
     ctx.save();
     ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
     if (p.bands) _planetBands(px, py, r);
+    if (p.spot) _redSpot(px, py, r);
+    if (p.craters) _craters(px, py, r, "rgba(50,44,38,0.35)");
     _planetShadow(px, py, r);
     ctx.restore();
 
     if (p.ring) _planetRing(px, py, r, p.ring, true);
   }
+}
+
+// The Sun sits upper-left — the same direction every body is lit from, so the
+// shading across Earth, the Moon, and the planets all reads as one light source.
+const SUN = { x: -.52, y: -.40, r: .05 };
+
+function drawSun(cx, cy, scale) {
+  const x = cx + SUN.x * scale, y = cy + SUN.y * scale, r = SUN.r * scale;
+
+  const corona = ctx.createRadialGradient(x, y, r * .4, x, y, r * 4);
+  corona.addColorStop(0, "rgba(255,240,190,0.55)");
+  corona.addColorStop(0.3, "rgba(255,200,110,0.28)");
+  corona.addColorStop(1, "rgba(255,180,80,0)");
+  ctx.fillStyle = corona;
+  ctx.beginPath(); ctx.arc(x, y, r * 4, 0, Math.PI * 2); ctx.fill();
+
+  const core = ctx.createRadialGradient(x - r * .2, y - r * .2, r * .1, x, y, r);
+  core.addColorStop(0, "#fff7e0"); core.addColorStop(0.6, "#ffd873"); core.addColorStop(1, "#ff9d3c");
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+// Our Moon, just off Earth, sharing Earth's lighting and terminator.
+const MOON = { x: .11, y: -.06, r: .012 };
+
+function drawMoon(cx, cy, scale) {
+  const x = cx + MOON.x * scale, y = cy + MOON.y * scale, r = MOON.r * scale;
+  _shadedSphere(x, y, r, "#e8e8ee", "#9a9aa6", "#3a3a44");
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+  _craters(x, y, r, "rgba(60,60,72,0.35)");
+  _planetShadow(x, y, r);
+  ctx.restore();
 }
 
 function drawOrbitalPaths(cx, cy, scale) {
@@ -544,9 +598,11 @@ function frame(realTime) {
   ctx.save();
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
+  drawSun(CX, CY, SCALE);
   drawPlanets(CX, CY, SCALE);
   drawOrbitalPaths(CX, CY, SCALE);
   drawEarth(CX, CY, SCALE);
+  drawMoon(CX, CY, SCALE);
   drawForecastPaths(CX, CY, SCALE);
   drawSceneObjects(CX, CY, SCALE, realTime);
   ctx.restore();
@@ -930,12 +986,12 @@ async function handleCSVUpload(file) {
 if (typeof module !== "undefined") {
   module.exports = {
     // Constants
-    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANETS,
+    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANETS, SUN, MOON,
     // Stateless pure functions
     esc,
     effectiveTime,
     findObjectAt,
-    drawPlanets,
+    drawPlanets, drawSun, drawMoon,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,

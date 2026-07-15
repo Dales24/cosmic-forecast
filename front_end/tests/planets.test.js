@@ -23,6 +23,23 @@ describe('PLANETS data', () => {
       expect(Math.hypot(p.x, p.y)).toBeGreaterThan(0.05);
     }
   });
+
+  test('the real solar-system planets are present, Mercury → Pluto', () => {
+    const names = app.PLANETS.map((p) => p.name);
+    for (const expected of [
+      'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
+    ]) {
+      expect(names).toContain(expected);
+    }
+  });
+
+  test('Jupiter is the largest disc; Saturn and Uranus are ringed', () => {
+    const byName = Object.fromEntries(app.PLANETS.map((p) => [p.name, p]));
+    const maxR = Math.max(...app.PLANETS.map((p) => p.r));
+    expect(byName.Jupiter.r).toBe(maxR);
+    expect(byName.Saturn.ring).toBeTruthy();
+    expect(byName.Uranus.ring).toBeTruthy();
+  });
 });
 
 describe('drawPlanets()', () => {
@@ -51,5 +68,38 @@ describe('drawPlanets()', () => {
     app.drawPlanets(400, 300, 500);
     // One clipped rect per ringed planet's front ring pass.
     expect(ctx.rect.mock.calls.length).toBeGreaterThanOrEqual(ringed);
+  });
+});
+
+describe('drawSun()', () => {
+  const ctx = document.getElementById('space-map').getContext('2d');
+
+  test('the Sun is upper-left, matching the scene light direction', () => {
+    // Every body is lit from the upper-left, so the Sun must live there too.
+    expect(app.SUN.x).toBeLessThan(0);
+    expect(app.SUN.y).toBeLessThan(0);
+    expect(app.SUN.r).toBeGreaterThan(0);
+  });
+
+  test('renders a corona and a disc without throwing', () => {
+    ctx.fill.mockClear();
+    expect(() => app.drawSun(400, 300, 500)).not.toThrow();
+    expect(ctx.fill.mock.calls.length).toBeGreaterThanOrEqual(2); // corona + core
+  });
+});
+
+describe('drawMoon()', () => {
+  const ctx = document.getElementById('space-map').getContext('2d');
+
+  test('the Moon sits close beside Earth at the origin', () => {
+    expect(Math.hypot(app.MOON.x, app.MOON.y)).toBeLessThan(0.2);
+    expect(app.MOON.r).toBeGreaterThan(0);
+  });
+
+  test('renders the disc plus craters without throwing', () => {
+    ctx.fill.mockClear();
+    expect(() => app.drawMoon(400, 300, 500)).not.toThrow();
+    // Sphere fill + four crater fills at minimum.
+    expect(ctx.fill.mock.calls.length).toBeGreaterThanOrEqual(5);
   });
 });
