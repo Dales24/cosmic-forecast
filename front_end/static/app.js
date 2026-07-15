@@ -378,6 +378,77 @@ function drawEarth(cx, cy, scale) {
   ctx.beginPath(); ctx.arc(cx, cy, r * 1.06, 0, Math.PI * 2); ctx.fill();
 }
 
+// ── Decorative planets ─────────────────────────────────────────────────────────
+// Distant worlds scattered behind Earth for depth. Purely visual — not scene
+// objects, so they never enter hit-testing, forecasting, or the legend.
+// Positions are normalized scale-units from the scene centre.
+const PLANETS = [
+  { x:  .34, y: -.30, r: .024, hi: "#f0a878", mid: "#c65f38", lo: "#5c2415" },
+  { x: -.38, y:  .21, r: .046, hi: "#f2d9b0", mid: "#c79a63", lo: "#6d4626", bands: true },
+  { x:  .31, y:  .34, r: .030, hi: "#efe0b0", mid: "#c9ac6b", lo: "#7a6034", ring: "#d8c48f" },
+  { x: -.29, y: -.33, r: .020, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
+];
+
+// A lit sphere: highlight upper-left, shading toward the far edge.
+function _shadedSphere(cx, cy, r, hi, mid, lo) {
+  const g = ctx.createRadialGradient(cx - r * .4, cy - r * .4, r * .1, cx, cy, r);
+  g.addColorStop(0, hi); g.addColorStop(0.55, mid); g.addColorStop(1, lo);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+}
+
+// Day/night shading, matching Earth's terminator so the lighting reads as one sun.
+function _planetShadow(cx, cy, r) {
+  const t = ctx.createRadialGradient(cx - r * .5, cy - r * .5, r * .2, cx + r * .6, cy + r * .6, r * 1.7);
+  t.addColorStop(0, "rgba(2,4,10,0)");
+  t.addColorStop(0.65, "rgba(2,4,10,0.12)");
+  t.addColorStop(1, "rgba(2,4,10,0.72)");
+  ctx.fillStyle = t;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+}
+
+// Horizontal cloud belts for a gas giant.
+function _planetBands(cx, cy, r) {
+  ctx.fillStyle = "rgba(90,55,25,0.20)";
+  for (const [oy, hh] of [[-.45, .11], [-.08, .16], [.28, .13], [.55, .09]]) {
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + oy * r, r * 0.99, hh * r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// A tilted ring; drawn once behind the planet and again (clipped low) in front.
+function _planetRing(cx, cy, r, color, front) {
+  ctx.save();
+  if (front) {
+    ctx.beginPath(); ctx.rect(cx - r * 3, cy, r * 6, r * 3); ctx.clip();
+  }
+  ctx.strokeStyle = hexA(color, front ? 0.9 : 0.5);
+  ctx.lineWidth = r * 0.3;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r * 2.05, r * 0.62, -0.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPlanets(cx, cy, scale) {
+  for (const p of PLANETS) {
+    const px = cx + p.x * scale, py = cy + p.y * scale, r = p.r * scale;
+
+    if (p.ring) _planetRing(px, py, r, p.ring, false);
+    _shadedSphere(px, py, r, p.hi, p.mid, p.lo);
+
+    // Belts and shading stay inside the disc.
+    ctx.save();
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
+    if (p.bands) _planetBands(px, py, r);
+    _planetShadow(px, py, r);
+    ctx.restore();
+
+    if (p.ring) _planetRing(px, py, r, p.ring, true);
+  }
+}
+
 function drawOrbitalPaths(cx, cy, scale) {
   for (const o of orbits) {
     const rx = scale * o.radius;
@@ -473,6 +544,7 @@ function frame(realTime) {
   ctx.save();
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
+  drawPlanets(CX, CY, SCALE);
   drawOrbitalPaths(CX, CY, SCALE);
   drawEarth(CX, CY, SCALE);
   drawForecastPaths(CX, CY, SCALE);
@@ -858,11 +930,12 @@ async function handleCSVUpload(file) {
 if (typeof module !== "undefined") {
   module.exports = {
     // Constants
-    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS,
+    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANETS,
     // Stateless pure functions
     esc,
     effectiveTime,
     findObjectAt,
+    drawPlanets,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,
