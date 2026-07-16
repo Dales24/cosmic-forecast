@@ -102,7 +102,7 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Testing
 
-Backend (Python) — coverage gate is enforced at **≥ 80%** (currently ~95%):
+Backend (Python) — coverage gate is enforced at **≥ 80%** (currently ~97%):
 
 ```bash
 uv run pytest --cov=. --cov-fail-under=80
