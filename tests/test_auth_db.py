@@ -131,6 +131,35 @@ def test_save_list_and_delete_upload(client):
     assert client.delete(f"/api/uploads/{uid}", headers=headers).status_code == 204
 
 
+def test_uploads_are_isolated_per_user(client):
+    h1 = _auth(client, "trent")
+    h2 = _auth(client, "walter")
+    client.post("/api/uploads", json={"filename": "a.png", "result": {}}, headers=h1)
+    assert client.get("/api/uploads", headers=h2).json()["uploads"] == []
+
+
+def test_cannot_delete_another_users_upload(client):
+    h1 = _auth(client, "sybil")
+    uid = client.post(
+        "/api/uploads", json={"filename": "a.png", "result": {}}, headers=h1
+    ).json()["id"]
+    h2 = _auth(client, "victor")
+    assert client.delete(f"/api/uploads/{uid}", headers=h2).status_code == 404
+
+
+def test_delete_missing_upload_returns_404(client):
+    headers = _auth(client, "oscar")
+    assert client.delete("/api/uploads/99999", headers=headers).status_code == 404
+
+
+def test_uploads_require_auth(client):
+    assert client.get("/api/uploads").status_code == 401
+    assert (
+        client.post("/api/uploads", json={"filename": "x", "result": {}}).status_code
+        == 401
+    )
+
+
 # ── unit: hashing ─────────────────────────────────────────────────────────────
 def test_password_hash_roundtrip():
     from app import auth
