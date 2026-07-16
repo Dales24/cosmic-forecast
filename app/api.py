@@ -5,10 +5,12 @@ from math import cos, pi, sin
 
 import numpy as np
 import requests as _requests
-from fastapi import FastAPI, File, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from app import auth, db
 
 # Add project root so `app.*` imports work when run from app/ directory
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -366,6 +368,86 @@ def api_forecast(body: ForecastRequest):
         forecast = linear_extrapolation(positions, horizon=50)
         predictions.append({"id": obj.id, "waypoints": forecast[:, :2].tolist()})
     return {"predictions": predictions}
+
+
+# ── Auth + saved work ─────────────────────────────────────────────────────────
+class RegisterIn(BaseModel):
+    username: str
+    password: str
+    email: str | None = None
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class SearchIn(BaseModel):
+    name: str
+    params: dict
+
+
+class UploadIn(BaseModel):
+    filename: str
+    result: dict
+    kind: str | None = None
+
+
+def _public_user(user) -> dict:
+    return {"id": user["id"], "username": user["username"], "email": user["email"]}
+
+
+@app.post("/api/auth/register")
+def api_register(body: RegisterIn):
+    return auth.register(body.username, body.password, body.email)
+
+
+@app.post("/api/auth/login")
+def api_login(body: LoginIn):
+    token = auth.login(body.username, body.password)
+    return {"token": token, "username": body.username.strip()}
+
+
+@app.post("/api/auth/logout", status_code=204)
+def api_logout(authorization: str = Header(default="")):
+    auth.logout(auth.bearer_token(authorization))
+
+
+@app.get("/api/auth/me")
+def api_me(user=Depends(auth.current_user)):
+    return _public_user(user)
+
+
+@app.get("/api/searches")
+def api_list_searches(user=Depends(auth.current_user)):
+    return {"searches": db.list_searches(user["id"])}
+
+
+@app.post("/api/searches")
+def api_save_search(body: SearchIn, user=Depends(auth.current_user)):
+    return {"id": db.add_search(user["id"], body.name, body.params)}
+
+
+@app.delete("/api/searches/{search_id}", status_code=204)
+def api_delete_search(search_id: int, user=Depends(auth.current_user)):
+    if not db.delete_search(user["id"], search_id):
+        raise HTTPException(404, "search not found")
+
+
+@app.get("/api/uploads")
+def api_list_uploads(user=Depends(auth.current_user)):
+    return {"uploads": db.list_uploads(user["id"])}
+
+
+@app.post("/api/uploads")
+def api_save_upload(body: UploadIn, user=Depends(auth.current_user)):
+    return {"id": db.add_upload(user["id"], body.filename, body.kind, body.result)}
+
+
+@app.delete("/api/uploads/{upload_id}", status_code=204)
+def api_delete_upload(upload_id: int, user=Depends(auth.current_user)):
+    if not db.delete_upload(user["id"], upload_id):
+        raise HTTPException(404, "upload not found")
 
 
 # ── Static files + SPA fallback ───────────────────────────────────────────────

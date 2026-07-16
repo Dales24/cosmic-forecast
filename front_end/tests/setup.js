@@ -54,7 +54,9 @@ const _mockCtx = {
   arc: jest.fn(), fill: jest.fn(), stroke: jest.fn(),
   translate: jest.fn(), scale: jest.fn(), save: jest.fn(), restore: jest.fn(),
   ellipse: jest.fn(), moveTo: jest.fn(), lineTo: jest.fn(), setLineDash: jest.fn(),
+  rotate: jest.fn(), clip: jest.fn(), drawImage: jest.fn(), rect: jest.fn(),
   createRadialGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
+  createLinearGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
   fillStyle: '', strokeStyle: '', lineWidth: 1,
   globalAlpha: 1, shadowColor: '', shadowBlur: 0,
 };

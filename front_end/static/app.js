@@ -210,14 +210,81 @@ function _staticItem(cls, text) {
   return li;
 }
 
-// ── Stars ─────────────────────────────────────────────────────────────────────
+// ── Stars & backdrop ──────────────────────────────────────────────────────────
+// Star colours span the stellar temperature range (blue-white → yellow/orange)
+// so the field reads as real starlight, not flat grey.
+const STAR_COLORS = ["#ffffff", "#dbe6ff", "#cfe0ff", "#ffe6c0", "#ffcda0"];
+
+// The static sky (gradient, nebulae, Milky Way, faint stars) is pre-rendered once
+// per resize into an offscreen canvas and blitted each frame; only the brighter
+// foreground stars twinkle live. Cheap, and smooth.
+const backdrop = document.createElement("canvas");
+const bctx = backdrop.getContext("2d");
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function buildBackdrop(w, h) {
+  backdrop.width = w;
+  backdrop.height = h;
+  const b = bctx;
+
+  // Deep-space gradient.
+  const g = b.createRadialGradient(w * .5, h * .42, 0, w * .5, h * .42, Math.max(w, h) * .8);
+  g.addColorStop(0, "#0b1230");
+  g.addColorStop(0.5, "#050817");
+  g.addColorStop(1, "#010208");
+  b.fillStyle = g;
+  b.fillRect(0, 0, w, h);
+
+  // Faint diagonal Milky Way band.
+  b.save();
+  b.translate(w * .5, h * .5);
+  b.rotate(-0.5);
+  const mw = b.createLinearGradient(0, -h * .22, 0, h * .22);
+  mw.addColorStop(0, "rgba(130,150,225,0)");
+  mw.addColorStop(0.5, "rgba(150,165,235,0.10)");
+  mw.addColorStop(1, "rgba(130,150,225,0)");
+  b.fillStyle = mw;
+  b.fillRect(-w, -h * .22, w * 2, h * .44);
+  b.restore();
+
+  // Coloured nebula clouds for depth.
+  const clouds = [
+    { x: .22, y: .30, r: .42, c: "rgba(80,60,165,0.18)" },
+    { x: .78, y: .62, r: .50, c: "rgba(40,95,155,0.16)" },
+    { x: .55, y: .18, r: .34, c: "rgba(150,55,120,0.10)" },
+  ];
+  for (const c of clouds) {
+    const rg = b.createRadialGradient(c.x * w, c.y * h, 0, c.x * w, c.y * h, c.r * Math.max(w, h));
+    rg.addColorStop(0, c.c);
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    b.fillStyle = rg;
+    b.fillRect(0, 0, w, h);
+  }
+
+  // Dense field of faint background stars.
+  const count = Math.floor(w * h / 1400);
+  for (let i = 0; i < count; i++) {
+    b.fillStyle = `rgba(210,224,255,${0.15 + Math.random() * 0.5})`;
+    b.beginPath();
+    b.arc(Math.random() * w, Math.random() * h, Math.random() * 0.9 + 0.2, 0, Math.PI * 2);
+    b.fill();
+  }
+}
+
 function initStars(n) {
   stars.length = 0;
   for (let i = 0; i < n; i++) {
     stars.push({
       x: Math.random(), y: Math.random(),
-      r: Math.random() * 1.4 + 0.3,
+      r: Math.random() * 1.3 + 0.5,
       tw: Math.random() * Math.PI * 2,
+      sp: 0.008 + Math.random() * 0.02,
+      color: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
+      glint: Math.random() < 0.1,
     });
   }
 }
@@ -225,35 +292,215 @@ function initStars(n) {
 // ── Draw helpers ──────────────────────────────────────────────────────────────
 function drawBackground() {
   const w = window.innerWidth, h = window.innerHeight;
-  const g = ctx.createRadialGradient(w*.5, h*.45, 0, w*.5, h*.45, Math.max(w,h)*.75);
-  g.addColorStop(0, "#0a1030");
-  g.addColorStop(0.45, "#050818");
-  g.addColorStop(1, "#010208");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(backdrop, 0, 0, w, h);
+
   for (const s of stars) {
-    const alpha = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(s.tw));
-    ctx.fillStyle = `rgba(220,230,255,${alpha})`;
-    ctx.beginPath();
-    ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-    ctx.fill();
-    s.tw += 0.015 + Math.random() * 0.01;
+    const tw    = 0.5 + 0.5 * Math.sin(s.tw);
+    const alpha = 0.45 + 0.55 * tw;
+    const x = s.x * w, y = s.y * h, r = s.r * (0.8 + 0.4 * tw);
+
+    // Brighter stars get a soft halo.
+    if (s.r > 1.1) {
+      const gr = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+      gr.addColorStop(0, hexA(s.color, alpha * 0.5));
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(x, y, r * 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.fillStyle = hexA(s.color, alpha);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+
+    // A few stars get a subtle diffraction glint.
+    if (s.glint) {
+      ctx.strokeStyle = hexA(s.color, alpha * 0.5);
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 3, y); ctx.lineTo(x + r * 3, y);
+      ctx.moveTo(x, y - r * 3); ctx.lineTo(x, y + r * 3);
+      ctx.stroke();
+    }
+    s.tw += s.sp;
   }
 }
 
 function drawEarth(cx, cy, scale) {
-  const r    = scale * 0.045;
-  const glow = ctx.createRadialGradient(cx, cy, r*.5, cx, cy, r*3);
-  glow.addColorStop(0, "rgba(77,163,255,0.35)");
-  glow.addColorStop(1, "rgba(77,163,255,0)");
+  const r = scale * 0.045;
+
+  // Outer atmosphere glow.
+  const glow = ctx.createRadialGradient(cx, cy, r * .9, cx, cy, r * 2.6);
+  glow.addColorStop(0, "rgba(90,170,255,0.35)");
+  glow.addColorStop(0.5, "rgba(70,140,255,0.12)");
+  glow.addColorStop(1, "rgba(70,140,255,0)");
   ctx.fillStyle = glow;
-  ctx.beginPath(); ctx.arc(cx, cy, r*3, 0, Math.PI*2); ctx.fill();
-  const eg = ctx.createRadialGradient(cx-r*.3, cy-r*.3, r*.2, cx, cy, r);
-  eg.addColorStop(0, "#7ec8ff"); eg.addColorStop(0.55, "#2b6cb0"); eg.addColorStop(1, "#0a2240");
+  ctx.beginPath(); ctx.arc(cx, cy, r * 2.6, 0, Math.PI * 2); ctx.fill();
+
+  // Ocean base, lit from the upper-left.
+  const eg = ctx.createRadialGradient(cx - r * .35, cy - r * .35, r * .15, cx, cy, r);
+  eg.addColorStop(0, "#8fd0ff"); eg.addColorStop(0.5, "#2f74c0"); eg.addColorStop(1, "#0a2038");
   ctx.fillStyle = eg;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = "rgba(140,200,255,0.5)"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+
+  // Surface detail, clipped to the globe.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+
+  // Continent hints.
+  ctx.fillStyle = "rgba(70,130,80,0.55)";
+  for (const [dx, dy, rr] of [[-.3, -.2, .45], [.25, .05, .5], [-.05, .35, .4], [.4, -.35, .3]]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + dx * r, cy + dy * r, rr * r, rr * r * 0.7, dx, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Day/night terminator — darken away from the sunlit side.
+  const term = ctx.createRadialGradient(cx - r * .5, cy - r * .5, r * .2, cx + r * .6, cy + r * .6, r * 1.8);
+  term.addColorStop(0, "rgba(2,6,16,0)");
+  term.addColorStop(0.6, "rgba(2,6,16,0.15)");
+  term.addColorStop(1, "rgba(2,6,16,0.8)");
+  ctx.fillStyle = term;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  // Specular highlight.
+  const spec = ctx.createRadialGradient(cx - r * .4, cy - r * .45, 0, cx - r * .4, cy - r * .45, r * .5);
+  spec.addColorStop(0, "rgba(255,255,255,0.5)");
+  spec.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = spec;
+  ctx.beginPath(); ctx.arc(cx - r * .4, cy - r * .45, r * .5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  // Thin bright atmosphere rim.
+  const rim = ctx.createRadialGradient(cx, cy, r * .92, cx, cy, r * 1.06);
+  rim.addColorStop(0, "rgba(150,210,255,0)");
+  rim.addColorStop(0.6, "rgba(150,210,255,0.35)");
+  rim.addColorStop(1, "rgba(150,210,255,0)");
+  ctx.fillStyle = rim;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 1.06, 0, Math.PI * 2); ctx.fill();
+}
+
+// ── Decorative planets ─────────────────────────────────────────────────────────
+// Distant worlds scattered behind Earth for depth. Purely visual — not scene
+// objects, so they never enter hit-testing, forecasting, or the legend.
+// Positions are normalized scale-units from the scene centre.
+const PLANETS = [
+  { name: "Mercury", x:  .43, y: -.05, r: .013, hi: "#cdc6ba", mid: "#7d7367", lo: "#2e2a24", craters: true },
+  { name: "Venus",   x:  .35, y: -.29, r: .020, hi: "#f6ead0", mid: "#d9b978", lo: "#8a6d3a" },
+  { name: "Mars",    x:  .13, y: -.41, r: .016, hi: "#f0a878", mid: "#c65f38", lo: "#5c2415" },
+  { name: "Jupiter", x: -.40, y:  .23, r: .046, hi: "#f2d9b0", mid: "#c79a63", lo: "#6d4626", bands: true, spot: true },
+  { name: "Saturn",  x:  .33, y:  .34, r: .034, hi: "#efe0b0", mid: "#c9ac6b", lo: "#7a6034", bands: true, ring: "#d8c48f" },
+  { name: "Uranus",  x: -.34, y:  .41, r: .026, hi: "#cdeefb", mid: "#8fd0e6", lo: "#3f8fae", ring: "#a9d9e6" },
+  { name: "Neptune", x: -.45, y: -.02, r: .025, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
+  { name: "Pluto",   x:  .07, y:  .44, r: .010, hi: "#d8cbb8", mid: "#9c8b74", lo: "#4a4136", craters: true },
+];
+
+// A lit sphere: highlight upper-left, shading toward the far edge.
+function _shadedSphere(cx, cy, r, hi, mid, lo) {
+  const g = ctx.createRadialGradient(cx - r * .4, cy - r * .4, r * .1, cx, cy, r);
+  g.addColorStop(0, hi); g.addColorStop(0.55, mid); g.addColorStop(1, lo);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+}
+
+// Day/night shading, matching Earth's terminator so the lighting reads as one sun.
+function _planetShadow(cx, cy, r) {
+  const t = ctx.createRadialGradient(cx - r * .5, cy - r * .5, r * .2, cx + r * .6, cy + r * .6, r * 1.7);
+  t.addColorStop(0, "rgba(2,4,10,0)");
+  t.addColorStop(0.65, "rgba(2,4,10,0.12)");
+  t.addColorStop(1, "rgba(2,4,10,0.72)");
+  ctx.fillStyle = t;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+}
+
+// Horizontal cloud belts for a gas giant.
+function _planetBands(cx, cy, r) {
+  ctx.fillStyle = "rgba(90,55,25,0.20)";
+  for (const [oy, hh] of [[-.45, .11], [-.08, .16], [.28, .13], [.55, .09]]) {
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + oy * r, r * 0.99, hh * r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Impact craters for rocky bodies (Mercury, Pluto, the Moon).
+function _craters(cx, cy, r, color) {
+  ctx.fillStyle = color;
+  for (const [dx, dy, rr] of [[-.3, -.2, .22], [.25, .1, .28], [.05, .4, .18], [.4, -.3, .15], [-.35, .28, .16]]) {
+    ctx.beginPath(); ctx.arc(cx + dx * r, cy + dy * r, rr * r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// Jupiter's Great Red Spot.
+function _redSpot(cx, cy, r) {
+  ctx.fillStyle = "rgba(200,90,60,0.55)";
+  ctx.beginPath(); ctx.ellipse(cx + r * .28, cy + r * .18, r * .22, r * .14, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+// A tilted ring; drawn once behind the planet and again (clipped low) in front.
+function _planetRing(cx, cy, r, color, front) {
+  ctx.save();
+  if (front) {
+    ctx.beginPath(); ctx.rect(cx - r * 3, cy, r * 6, r * 3); ctx.clip();
+  }
+  ctx.strokeStyle = hexA(color, front ? 0.9 : 0.5);
+  ctx.lineWidth = r * 0.3;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r * 2.05, r * 0.62, -0.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPlanets(cx, cy, scale) {
+  for (const p of PLANETS) {
+    const px = cx + p.x * scale, py = cy + p.y * scale, r = p.r * scale;
+
+    if (p.ring) _planetRing(px, py, r, p.ring, false);
+    _shadedSphere(px, py, r, p.hi, p.mid, p.lo);
+
+    // Belts and shading stay inside the disc.
+    ctx.save();
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
+    if (p.bands) _planetBands(px, py, r);
+    if (p.spot) _redSpot(px, py, r);
+    if (p.craters) _craters(px, py, r, "rgba(50,44,38,0.35)");
+    _planetShadow(px, py, r);
+    ctx.restore();
+
+    if (p.ring) _planetRing(px, py, r, p.ring, true);
+  }
+}
+
+// The Sun sits upper-left — the same direction every body is lit from, so the
+// shading across Earth, the Moon, and the planets all reads as one light source.
+const SUN = { x: -.52, y: -.40, r: .05 };
+
+function drawSun(cx, cy, scale) {
+  const x = cx + SUN.x * scale, y = cy + SUN.y * scale, r = SUN.r * scale;
+
+  const corona = ctx.createRadialGradient(x, y, r * .4, x, y, r * 4);
+  corona.addColorStop(0, "rgba(255,240,190,0.55)");
+  corona.addColorStop(0.3, "rgba(255,200,110,0.28)");
+  corona.addColorStop(1, "rgba(255,180,80,0)");
+  ctx.fillStyle = corona;
+  ctx.beginPath(); ctx.arc(x, y, r * 4, 0, Math.PI * 2); ctx.fill();
+
+  const core = ctx.createRadialGradient(x - r * .2, y - r * .2, r * .1, x, y, r);
+  core.addColorStop(0, "#fff7e0"); core.addColorStop(0.6, "#ffd873"); core.addColorStop(1, "#ff9d3c");
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+// Our Moon, just off Earth, sharing Earth's lighting and terminator.
+const MOON = { x: .11, y: -.06, r: .012 };
+
+function drawMoon(cx, cy, scale) {
+  const x = cx + MOON.x * scale, y = cy + MOON.y * scale, r = MOON.r * scale;
+  _shadedSphere(x, y, r, "#e8e8ee", "#9a9aa6", "#3a3a44");
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+  _craters(x, y, r, "rgba(60,60,72,0.35)");
+  _planetShadow(x, y, r);
+  ctx.restore();
 }
 
 function drawOrbitalPaths(cx, cy, scale) {
@@ -351,8 +598,11 @@ function frame(realTime) {
   ctx.save();
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
+  drawSun(CX, CY, SCALE);
+  drawPlanets(CX, CY, SCALE);
   drawOrbitalPaths(CX, CY, SCALE);
   drawEarth(CX, CY, SCALE);
+  drawMoon(CX, CY, SCALE);
   drawForecastPaths(CX, CY, SCALE);
   drawSceneObjects(CX, CY, SCALE, realTime);
   ctx.restore();
@@ -377,6 +627,7 @@ function resize() {
   canvas.style.width  = window.innerWidth  + "px";
   canvas.style.height = window.innerHeight + "px";
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  buildBackdrop(window.innerWidth, window.innerHeight);
 }
 
 window.addEventListener("resize", () => { resize(); initStars(320); });
@@ -735,11 +986,12 @@ async function handleCSVUpload(file) {
 if (typeof module !== "undefined") {
   module.exports = {
     // Constants
-    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS,
+    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANETS, SUN, MOON,
     // Stateless pure functions
     esc,
     effectiveTime,
     findObjectAt,
+    drawPlanets, drawSun, drawMoon,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,
