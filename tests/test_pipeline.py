@@ -3,7 +3,12 @@ import numpy as np
 from app.detections import Detection, Track
 from app.kalman_refinement import KalmanRefiner
 from app.object_classifier import generate_synthetic_dataset
-from app.pipeline import FrameInput, create_default_pipeline
+from app.pipeline import (
+    ForecastPipeline,
+    FrameInput,
+    PipelineResult,
+    create_default_pipeline,
+)
 from app.track_builder import TrackBuilder
 from app.trajectory_transformer import (
     create_trajectory_transformer,
@@ -107,3 +112,61 @@ def test_end_to_end_pipeline():
     assert len(result.predictions) == 1
     assert result.predictions[0].x > x - 20.0
     assert result.predictions[0].object_class is not None
+
+
+# ── predict_positions: target-timestamp handling and skips ────────────────────
+
+
+def _moving_track_builder():
+    """Three colinear detections → one track the extrapolator can forecast."""
+    builder = TrackBuilder(max_distance=10.0)
+    builder.update([Detection(frame_id=0, timestamp=0.0, x=10.0, y=10.0)])
+    builder.update([Detection(frame_id=1, timestamp=1.0, x=13.0, y=12.0)])
+    builder.update([Detection(frame_id=2, timestamp=2.0, x=16.0, y=14.0)])
+    return builder
+
+
+def _pipeline_without_models(track_builder):
+    # A truthy cnn_model skips model creation; no trajectory model → linear path.
+    return ForecastPipeline(
+        cnn_model=object(), trajectory_model=None, track_builder=track_builder
+    )
+
+
+def test_predict_positions_derives_target_timestamp_when_absent():
+    pipeline = _pipeline_without_models(_moving_track_builder())
+    predictions = pipeline.predict_positions()  # target_timestamp=None → auto-derive
+
+    assert len(predictions) == 1
+    # Auto target = last_ts + mean_dt * horizon = 2 + 1 * horizon.
+    assert predictions[0].timestamp == 2.0 + pipeline.forecast_horizon
+
+
+def test_predict_positions_skips_single_detection_tracks():
+    builder = _moving_track_builder()
+    # A lone far-away detection starts a second, one-point track.
+    builder.update([Detection(frame_id=3, timestamp=3.0, x=500.0, y=500.0)])
+    pipeline = _pipeline_without_models(builder)
+
+    assert len(builder.tracks) == 2
+    assert len(pipeline.predict_positions()) == 1  # single-point track dropped
+
+
+def test_predict_positions_empty_without_tracks():
+    pipeline = _pipeline_without_models(TrackBuilder())
+    assert pipeline.predict_positions() == []
+
+
+def test_pipeline_result_as_dict_shape():
+    builder = _moving_track_builder()
+    pipeline = _pipeline_without_models(builder)
+    result = PipelineResult(
+        tracks=builder.tracks, predictions=pipeline.predict_positions()
+    )
+
+    payload = result.as_dict()
+    assert set(payload) == {"tracks", "predictions"}
+    track = payload["tracks"][0]
+    assert track["detection_count"] == 3
+    assert set(track["latest"]) == {"x", "y", "timestamp"}
+    assert len(payload["predictions"]) == 1

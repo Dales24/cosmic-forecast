@@ -46,11 +46,26 @@ front_end/
 |--------|------|-------------|
 | `GET` | `/` | Frontend SPA |
 | `GET` | `/static/*` | CSS and JS assets |
+| `GET` | `/api/scene` | Assembled scene (CelesTrak TLEs + JPL + SIMBAD) for a datetime |
 | `GET` | `/api/objects/{slug}` | Live data from CelesTrak / JPL / SIMBAD |
 | `GET` | `/api/classify/{id}` | CNN classification for a canvas object |
+| `POST` | `/api/classify/upload` | CNN classification for an uploaded image |
+| `POST` | `/api/upload/csv` | Build a scene from an uploaded positions CSV |
 | `POST` | `/api/forecast` | Trajectory extrapolation for tracked objects |
 
-Query params for `/api/objects/{slug}`: `date=YYYY-MM-DD`, `limit=20`.
+**Accounts & persistence** (SQLite, Bearer-token sessions):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/register` · `/api/auth/login` · `/api/auth/logout` | Account + session lifecycle |
+| `GET` | `/api/auth/me` | Current signed-in user |
+| `GET`/`POST` | `/api/searches` | List / save simulation searches |
+| `DELETE` | `/api/searches/{id}` | Delete a saved search |
+| `GET`/`POST` | `/api/uploads` | List / save classification uploads |
+| `DELETE` | `/api/uploads/{id}` | Delete a saved upload |
+
+Query params for `/api/objects/{slug}`: `date=YYYY-MM-DD`, `limit=20`. The DB path
+defaults to `data/cosmic.db` (override with `COSMIC_DB_PATH`).
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 
@@ -87,9 +102,21 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Testing
 
+Backend (Python) — coverage gate is enforced at **≥ 80%** (currently ~95%):
+
 ```bash
 uv run pytest --cov=. --cov-fail-under=80
 ```
+
+Frontend (canvas SPA) — Jest + jsdom:
+
+```bash
+cd front_end && npm test
+```
+
+> **Note:** TensorFlow 2.16 imports `distutils`, which Python 3.12 dropped from
+> the stdlib. `setuptools<74` (pinned) restores it at runtime, and the root
+> `conftest.py` activates the shim before pytest collects any TF-importing test.
 
 ## Training
 

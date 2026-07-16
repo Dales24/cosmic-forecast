@@ -44,6 +44,28 @@ def test_index_returns_html():
     assert "text/html" in r.headers["content-type"]
 
 
+# ── GET /api/objects/{object_slug} ────────────────────────────────────────────
+
+
+def test_get_objects_passes_query_params_to_data_parser():
+    rows = [{"name": "Ceres", "date": "2025-06-01"}]
+    with patch("app.data_parser.get_data", return_value=rows) as mock_get:
+        r = client.get("/api/objects/asteroid?date=2025-06-01&limit=5")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["slug"] == "asteroid"
+    assert body["results"] == rows
+    mock_get.assert_called_once_with("asteroid", date="2025-06-01", limit=5)
+
+
+def test_get_objects_defaults_when_no_query():
+    with patch("app.data_parser.get_data", return_value=[]) as mock_get:
+        r = client.get("/api/objects/comet")
+    assert r.status_code == 200
+    assert r.json() == {"slug": "comet", "results": []}
+    mock_get.assert_called_once_with("comet", date=None, limit=20)
+
+
 # ── GET /api/classify/{obj_id} ────────────────────────────────────────────────
 
 _MOCK_CLASSIFICATION = {
