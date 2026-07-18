@@ -281,6 +281,21 @@ def test_scene_includes_jpl_and_simbad_objects():
             assert field in obj
 
 
+def test_scene_includes_deep_space_pack():
+    """Black holes, stars, quasars, pulsars, and SNRs reach the scene from SIMBAD."""
+    record = [{"main_id": "Cyg X-1", "ra": 299.59, "dec": 35.2}]
+    with (
+        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=record),
+    ):
+        r = client.get("/api/scene")
+
+    kinds = {o["kind"] for o in r.json()["objects"]}
+    for kind in ("star", "black_hole", "quasar", "pulsar", "supernova_remnant"):
+        assert kind in kinds, f"missing {kind}"
+
+
 # ── Catalog scene-object helpers ──────────────────────────────────────────────
 
 

@@ -25,7 +25,7 @@ def test_num_classes_matches_object_classes():
 
 
 def test_total_class_count():
-    assert NUM_CLASSES == 14
+    assert NUM_CLASSES == 19
 
 
 def test_natural_objects_count():
@@ -37,7 +37,7 @@ def test_artificial_objects_count():
 
 
 def test_deep_space_objects_count():
-    assert len(DEEP_SPACE_OBJECTS) == 4
+    assert len(DEEP_SPACE_OBJECTS) == 9
 
 
 def test_unknown_objects_count():
@@ -100,6 +100,11 @@ def test_artificial_slugs_present(slug):
         "nebula",
         "star_cluster",
         "variable_star",
+        "star",
+        "black_hole",
+        "quasar",
+        "pulsar",
+        "supernova_remnant",
     ],
 )
 def test_deep_space_slugs_present(slug):

@@ -225,6 +225,13 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
     # Deep-space catalog objects (SIMBAD) — static over the sim timescale.
     objects.extend(_simbad_scene_objects("galaxy", "galaxy", limit=4))
     objects.extend(_simbad_scene_objects("nebula", "nebula", limit=3))
+    objects.extend(_simbad_scene_objects("star", "star", limit=3))
+    objects.extend(_simbad_scene_objects("black_hole", "black_hole", limit=2))
+    objects.extend(_simbad_scene_objects("quasar", "quasar", limit=2))
+    objects.extend(_simbad_scene_objects("pulsar", "pulsar", limit=2))
+    objects.extend(
+        _simbad_scene_objects("supernova_remnant", "supernova_remnant", limit=2)
+    )
 
     # Unidentified — position intentionally unknown
     objects.append(

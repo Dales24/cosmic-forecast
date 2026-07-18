@@ -4,6 +4,10 @@ A prediction system for tracking and forecasting space object trajectories. The 
 
 ## Architecture
 
+For the full picture — the CNN → track → transformer → Kalman pipeline, data
+sources, API surface, accounts, and how to add a new detection — see
+[docs/architecture.md](docs/architecture.md).
+
 ```
 app/
   api.py                     FastAPI backend — API routes + static file serving

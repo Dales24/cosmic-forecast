@@ -13,6 +13,11 @@ const KIND_STYLES = {
   nebula:            { size: 5,  color: "#c084fc" },
   star_cluster:      { size: 4,  color: "#f0abfc" },
   variable_star:     { size: 3,  color: "#fbbf24" },
+  star:              { size: 3,  color: "#fde68a" },
+  black_hole:        { size: 5,  color: "#7c3aed" },
+  quasar:            { size: 4,  color: "#22d3ee" },
+  pulsar:            { size: 3,  color: "#f472b6" },
+  supernova_remnant: { size: 5,  color: "#fb7185" },
   ufo:               { size: 4,  color: "#00ff88" },
 };
 
@@ -30,6 +35,11 @@ const KIND_NAMES = {
   nebula:            "Nebula",
   star_cluster:      "Star Cluster",
   variable_star:     "Variable Star",
+  star:              "Star",
+  black_hole:        "Black Hole \u{1F573}",
+  quasar:            "Quasar",
+  pulsar:            "Pulsar",
+  supernova_remnant: "Supernova Remnant",
   ufo:               "Unidentified \u{1F47D}",
 };
 

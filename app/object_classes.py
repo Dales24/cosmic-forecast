@@ -30,6 +30,11 @@ DEEP_SPACE_OBJECTS = (
     ObjectClass("Nebula", "nebula", "deep_space"),
     ObjectClass("Star Cluster", "star_cluster", "deep_space"),
     ObjectClass("Variable Star", "variable_star", "deep_space"),
+    ObjectClass("Star", "star", "deep_space"),
+    ObjectClass("Black Hole", "black_hole", "deep_space"),
+    ObjectClass("Quasar", "quasar", "deep_space"),
+    ObjectClass("Pulsar", "pulsar", "deep_space"),
+    ObjectClass("Supernova Remnant", "supernova_remnant", "deep_space"),
 )
 
 UNKNOWN_OBJECTS = (ObjectClass("Unidentified", "ufo", "unknown"),)

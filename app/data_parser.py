@@ -103,6 +103,11 @@ _SIMBAD_OTYPES: dict[str, str] = {
     "nebula": "PN",  # planetary nebula; broaden with LIKE 'PN%' below
     "star_cluster": "Cl*",
     "variable_star": "V*",
+    "star": "*",  # LIKE '*%' catches single/double/peculiar stars
+    "black_hole": "BH",
+    "quasar": "QSO",
+    "pulsar": "Psr",
+    "supernova_remnant": "SNR",
 }
 
 
@@ -141,13 +146,12 @@ def get_data(object_slug: str, date: str | None = None, limit: int = 20) -> list
     """
     celestrak_slugs = {"satellite", "iss", "space_debris", "rocket_body"}
     jpl_slugs = {"asteroid", "comet", "meteor", "meteoroid", "near_earth_object"}
-    simbad_slugs = {"galaxy", "nebula", "star_cluster", "variable_star"}
 
     if object_slug in celestrak_slugs:
         return fetch_celestrak(object_slug, limit)
     if object_slug in jpl_slugs:
         return fetch_jpl(date, limit)
-    if object_slug in simbad_slugs:
+    if object_slug in _SIMBAD_OTYPES:  # every SIMBAD-backed deep-space slug
         return fetch_simbad(object_slug, limit)
     if object_slug == "ufo":
         return []  # no catalogued source — that's the point

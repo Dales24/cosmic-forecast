@@ -192,6 +192,22 @@ def test_fetch_simbad_nebula_slug():
     assert "PN" in query
 
 
+@pytest.mark.parametrize(
+    "slug,otype",
+    [
+        ("star", "*"),
+        ("black_hole", "BH"),
+        ("quasar", "QSO"),
+        ("pulsar", "Psr"),
+        ("supernova_remnant", "SNR"),
+    ],
+)
+def test_fetch_simbad_deep_space_pack_otypes(slug, otype):
+    with patch("app.data_parser.requests.get", return_value=_simbad_response()) as mock:
+        fetch_simbad(slug, limit=2)
+    assert otype in mock.call_args[1]["params"]["QUERY"]
+
+
 # ── get_data routing ──────────────────────────────────────────────────────────
 
 
@@ -211,7 +227,20 @@ def test_get_data_jpl_slugs_route_correctly(slug):
     mock.assert_called_once_with("2025-01-01", 10)
 
 
-@pytest.mark.parametrize("slug", ["galaxy", "nebula", "star_cluster", "variable_star"])
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "galaxy",
+        "nebula",
+        "star_cluster",
+        "variable_star",
+        "star",
+        "black_hole",
+        "quasar",
+        "pulsar",
+        "supernova_remnant",
+    ],
+)
 def test_get_data_simbad_slugs_route_correctly(slug):
     with patch("app.data_parser.fetch_simbad", return_value=[]) as mock:
         get_data(slug, limit=7)
