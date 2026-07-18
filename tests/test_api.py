@@ -296,6 +296,26 @@ def test_scene_includes_deep_space_pack():
         assert kind in kinds, f"missing {kind}"
 
 
+def test_scene_is_cached_within_ttl():
+    """A repeat scene load is served from cache and doesn't refetch catalogs."""
+    calls = {"jpl": 0}
+
+    def fake_jpl(date, limit):
+        calls["jpl"] += 1
+        return []
+
+    with (
+        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_jpl", side_effect=fake_jpl),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        first = client.get("/api/scene")
+        second = client.get("/api/scene")
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert calls["jpl"] == 1  # second request hit the cache, not the network
+
+
 # ── Catalog scene-object helpers ──────────────────────────────────────────────
 
 

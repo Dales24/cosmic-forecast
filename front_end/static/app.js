@@ -61,6 +61,7 @@ let CX = 0, CY = 0, SCALE = 1;
 // ── Scene state ───────────────────────────────────────────────────────────────
 let sceneObjects = [];       // [{id, name, kind, x_norm, y_norm, vx_norm, vy_norm, source}]
 let objPositions = [];       // [{x, y}] world coords, updated each frame
+let objTrails = [];          // [[{x, y}, …]] recent positions per object (motion trails)
 let filterKind   = null;     // null = show all kinds
 let hoveredIdx   = -1;
 let selectedIdx  = null;
@@ -288,13 +289,18 @@ function buildBackdrop(w, h) {
 function initStars(n) {
   stars.length = 0;
   for (let i = 0; i < n; i++) {
+    // Magnitude 0..1 skewed toward the dim end (power law), so most stars are
+    // faint pinpoints and only a few are bright — like a real sky. Size and
+    // brightness both scale with it; only the brightest sparkle.
+    const mag = Math.pow(Math.random(), 2.6);
     stars.push({
       x: Math.random(), y: Math.random(),
-      r: Math.random() * 1.3 + 0.5,
+      mag,
+      r: 0.4 + mag * 1.9,
       tw: Math.random() * Math.PI * 2,
       sp: 0.008 + Math.random() * 0.02,
       color: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
-      glint: Math.random() < 0.1,
+      glint: mag > 0.85,
     });
   }
 }
@@ -306,7 +312,8 @@ function drawBackground() {
 
   for (const s of stars) {
     const tw    = 0.5 + 0.5 * Math.sin(s.tw);
-    const alpha = 0.45 + 0.55 * tw;
+    // Dim stars are genuinely faint; brightness tracks magnitude and twinkle.
+    const alpha = (0.25 + 0.75 * (s.mag ?? 1)) * (0.5 + 0.5 * tw);
     const x = s.x * w, y = s.y * h, r = s.r * (0.8 + 0.4 * tw);
 
     // Brighter stars get a soft halo.
@@ -332,6 +339,78 @@ function drawBackground() {
     }
     s.tw += s.sp;
   }
+}
+
+// Occasional meteors streaking across the sky — a few live at a time, spawned
+// at random from the upper-left, fading as they fall. Screen-space, additive.
+const meteors = [];
+function drawShootingStars() {
+  const w = window.innerWidth, h = window.innerHeight;
+  if (meteors.length < 3 && Math.random() < 0.01) {
+    const fromLeft = Math.random() < 0.5;
+    meteors.push({
+      x: fromLeft ? -20 : Math.random() * w,
+      y: fromLeft ? Math.random() * h * 0.5 : -20,
+      vx: 6 + Math.random() * 5,
+      vy: 3 + Math.random() * 4,
+      life: 1,
+    });
+  }
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineWidth = 1.6;
+  for (let i = meteors.length - 1; i >= 0; i--) {
+    const m = meteors[i];
+    m.x += m.vx; m.y += m.vy; m.life -= 0.012;
+    if (m.life <= 0 || m.x > w + 40 || m.y > h + 40) { meteors.splice(i, 1); continue; }
+    const tailX = m.x - m.vx * 3.2, tailY = m.y - m.vy * 3.2;
+    const g = ctx.createLinearGradient(m.x, m.y, tailX, tailY);
+    g.addColorStop(0, hexA("#ffffff", m.life));
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.strokeStyle = g;
+    ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(tailX, tailY); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Lens flare: translucent artifacts strung along the axis from the Sun through
+// the screen centre, like light bouncing inside a lens. Screen-space, additive.
+function drawSunFlare(sx, sy) {
+  const w = window.innerWidth, h = window.innerHeight;
+  const dx = w * 0.5 - sx, dy = h * 0.5 - sy;
+  const flares = [
+    [0.0, 26, "rgba(255,220,150,0.10)"],
+    [0.35, 10, "rgba(120,180,255,0.10)"],
+    [0.6, 18, "rgba(255,140,180,0.08)"],
+    [0.85, 7, "rgba(180,255,200,0.11)"],
+    [1.25, 30, "rgba(255,200,120,0.07)"],
+  ];
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const [t, r, color] of flares) {
+    const x = sx + dx * t, y = sy + dy * t;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, color);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// A soft darkening toward the frame edges — the eyepiece/sensor falloff that
+// makes the view feel observed rather than flat. Drawn in screen space.
+function drawVignette() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const g = ctx.createRadialGradient(
+    w * 0.5, h * 0.5, Math.min(w, h) * 0.34,
+    w * 0.5, h * 0.5, Math.max(w, h) * 0.72
+  );
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(1, "rgba(0,0,0,0.5)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
 }
 
 function drawEarth(cx, cy, scale) {
@@ -370,6 +449,17 @@ function drawEarth(cx, cy, scale) {
   term.addColorStop(1, "rgba(2,6,16,0.8)");
   ctx.fillStyle = term;
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  // City lights on the night side (positive offsets = away from the Sun).
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = "rgba(255,214,140,0.9)";
+  for (const [dx, dy] of [[.35, .3], [.5, .15], [.2, .55], [.6, .42], [.45, .62], [.3, .4], [.68, .22], [.16, .34]]) {
+    ctx.beginPath();
+    ctx.arc(cx + dx * r, cy + dy * r, r * 0.03, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 
   // Specular highlight.
   const spec = ctx.createRadialGradient(cx - r * .4, cy - r * .45, 0, cx - r * .4, cy - r * .45, r * .5);
@@ -499,17 +589,37 @@ function drawSun(cx, cy, scale) {
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
 }
 
-// Our Moon, just off Earth, sharing Earth's lighting and terminator.
-const MOON = { x: .11, y: -.06, r: .012 };
+// Our Moon, orbiting Earth, lit by the Sun with a real phase.
+const MOON = { x: .14, y: -.075, r: .016 };
 
 function drawMoon(cx, cy, scale) {
   const x = cx + MOON.x * scale, y = cy + MOON.y * scale, r = MOON.r * scale;
+
+  // Faint orbit ring around Earth, passing through the Moon.
+  const dist = Math.hypot(MOON.x, MOON.y) * scale;
+  ctx.strokeStyle = "rgba(180,200,255,0.12)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, dist, 0, Math.PI * 2); ctx.stroke();
+
+  // Soft glow so it's easy to spot next to Earth.
+  _additive(() => _bloom(x, y, r * 2.4, "#dfe3ee", 0.22));
+
   _shadedSphere(x, y, r, "#e8e8ee", "#9a9aa6", "#3a3a44");
 
   ctx.save();
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
   _craters(x, y, r, "rgba(60,60,72,0.35)");
-  _planetShadow(x, y, r);
+
+  // Lunar phase: the night side faces away from the Sun.
+  let lx = (cx + SUN.x * scale) - x, ly = (cy + SUN.y * scale) - y;
+  const len = Math.hypot(lx, ly) || 1;
+  lx /= len; ly /= len;
+  const sx = x - lx * r * 1.1, sy = y - ly * r * 1.1; // shadow centre, anti-Sun
+  const shade = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r * 1.9);
+  shade.addColorStop(0, "rgba(5,6,12,0.92)");
+  shade.addColorStop(0.6, "rgba(5,6,12,0.5)");
+  shade.addColorStop(1, "rgba(5,6,12,0)");
+  ctx.fillStyle = shade;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
   ctx.restore();
 }
 
@@ -558,11 +668,157 @@ function drawForecastPaths(cx, cy, scale) {
   ctx.restore();
 }
 
+// ── Realistic per-kind glyphs ──────────────────────────────────────────────────
+// A soft radial glow fading to transparent.
+function _bloom(x, y, r, color, alpha) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, hexA(color, alpha));
+  g.addColorStop(1, hexA(color, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+// The 4-point diffraction spike real optics give bright point sources.
+function _spikes(x, y, len, color, alpha, width) {
+  ctx.strokeStyle = hexA(color, alpha);
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(x - len, y); ctx.lineTo(x + len, y);
+  ctx.moveTo(x, y - len); ctx.lineTo(x, y + len);
+  ctx.stroke();
+}
+
+function _core(x, y, r, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+// Run a draw with additive blending so overlapping light adds up, then restore.
+function _additive(draw) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  draw();
+  ctx.restore();
+}
+
+// A fading streak behind a moving object.
+function _drawTrail(trail, color) {
+  if (!trail || trail.length < 2) return;
+  ctx.lineWidth = 1.5;
+  for (let i = 1; i < trail.length; i++) {
+    ctx.strokeStyle = hexA(color, (i / trail.length) * 0.5);
+    ctx.beginPath();
+    ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+    ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.stroke();
+  }
+}
+
+// Draw one object as a glyph that reads as its kind, not a flat dot.
+function drawGlyph(kind, x, y, style, phase, sunX, sunY) {
+  const c = style.color;
+  const s = style.size;
+
+  switch (kind) {
+    case "star":
+    case "variable_star":
+      _additive(() => { _bloom(x, y, s * 4, c, 0.6); _spikes(x, y, s * 3.5, "#ffffff", 0.5, 1); });
+      _core(x, y, s * 0.7, "#ffffff");
+      break;
+
+    case "galaxy": {
+      const tilt = (x * 0.7 + y * 0.3) % Math.PI; // deterministic per position
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(tilt);
+      _additive(() => {
+        for (const [rx, ry, a] of [[s * 3, s * 1.4, 0.18], [s * 2, s * 0.9, 0.28], [s, s * 0.5, 0.5]]) {
+          const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+          g.addColorStop(0, hexA(c, a)); g.addColorStop(1, hexA(c, 0));
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+        }
+      });
+      ctx.restore();
+      _core(x, y, s * 0.5, "#ffffff");
+      break;
+    }
+
+    case "nebula":
+      _additive(() => {
+        for (const [dx, dy, r, a] of [[0, 0, s * 3, 0.28], [s, -s * 0.6, s * 2, 0.2], [-s, s * 0.5, s * 2.2, 0.18]]) {
+          _bloom(x + dx, y + dy, r, c, a);
+        }
+      });
+      break;
+
+    case "black_hole":
+      _additive(() => _bloom(x, y, s * 3.5, "#ffa24a", 0.35)); // lensing glow
+      ctx.fillStyle = "#05060a"; // event-horizon shadow
+      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+      _additive(() => {
+        ctx.strokeStyle = hexA("#ffd27a", 0.9); ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(x, y, s * 1.5, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = hexA(c, 0.5); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(x, y, s * 2.1, 0, Math.PI * 2); ctx.stroke();
+      });
+      break;
+
+    case "comet": {
+      let tx = x - sunX, ty = y - sunY; // tail streams away from the Sun
+      const d = Math.hypot(tx, ty) || 1;
+      tx /= d; ty /= d;
+      const tail = s * 8;
+      _additive(() => {
+        const g = ctx.createLinearGradient(x, y, x + tx * tail, y + ty * tail);
+        g.addColorStop(0, hexA(c, 0.6)); g.addColorStop(1, hexA(c, 0));
+        ctx.strokeStyle = g; ctx.lineWidth = s * 1.4;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + tx * tail, y + ty * tail); ctx.stroke();
+        _bloom(x, y, s * 2.5, c, 0.6);
+      });
+      _core(x, y, s * 0.6, "#ddffff");
+      break;
+    }
+
+    case "pulsar": {
+      const pulse = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(phase * 3));
+      _additive(() => { _bloom(x, y, s * 4 * pulse, c, 0.7 * pulse); _spikes(x, y, s * 5, c, 0.35 * pulse, 1); });
+      _core(x, y, s * 0.6, "#ffffff");
+      break;
+    }
+
+    case "quasar":
+      _additive(() => {
+        _bloom(x, y, s * 4, c, 0.7);
+        ctx.strokeStyle = hexA(c, 0.5); ctx.lineWidth = 1.4; // relativistic jet
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - s * 7); ctx.stroke();
+      });
+      _core(x, y, s * 0.7, "#ffffff");
+      break;
+
+    case "iss":
+    case "satellite":
+    case "space_debris":
+    case "rocket_body":
+      _additive(() => { _bloom(x, y, s * 2, c, 0.6); _spikes(x, y, s * 2.2, "#ffffff", 0.7, 1); });
+      _core(x, y, Math.max(1.2, s * 0.5), "#ffffff");
+      break;
+
+    default: // asteroids, near-Earth objects, meteors, ufo — a glowing point
+      _additive(() => _bloom(x, y, s * 2.4, c, 0.5));
+      _core(x, y, s, c);
+  }
+}
+
 function drawSceneObjects(cx, cy, scale, realTime) {
   // How far has simulation advanced (in real seconds of object physics)?
   const simElapsedS = (simMode && !simPaused)
     ? (effectiveTime(realTime) - simStartEff) / 1000
     : 0;
+  const moving = simMode && !simPaused;
+  const phase = realTime * 0.004;
+  const sunX = cx + SUN.x * scale, sunY = cy + SUN.y * scale;
+
+  if (objTrails.length !== sceneObjects.length) objTrails = sceneObjects.map(() => []);
 
   for (let i = 0; i < sceneObjects.length; i++) {
     const obj   = sceneObjects[i];
@@ -570,12 +826,22 @@ function drawSceneObjects(cx, cy, scale, realTime) {
 
     if (filterKind && obj.kind !== filterKind) {
       objPositions[i] = { x: -9999, y: -9999 }; // off-screen so hit test skips
+      objTrails[i].length = 0;
       continue;
     }
 
     const wx = cx + (obj.x_norm + (obj.vx_norm || 0) * simElapsedS) * scale;
     const wy = cy + (obj.y_norm + (obj.vy_norm || 0) * simElapsedS) * scale;
     objPositions[i] = { x: wx, y: wy };
+
+    // Motion trail for objects that actually move, only while the sim runs.
+    if (moving && (obj.vx_norm || obj.vy_norm)) {
+      objTrails[i].push({ x: wx, y: wy });
+      if (objTrails[i].length > 14) objTrails[i].shift();
+    } else if (!moving && objTrails[i].length) {
+      objTrails[i].length = 0;
+    }
+    _drawTrail(objTrails[i], style.color);
 
     if (i === selectedIdx) {
       ctx.strokeStyle = style.color; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.75;
@@ -588,10 +854,7 @@ function drawSceneObjects(cx, cy, scale, realTime) {
       ctx.globalAlpha = 1;
     }
 
-    ctx.fillStyle   = style.color;
-    ctx.shadowColor = style.color; ctx.shadowBlur = 8;
-    ctx.beginPath(); ctx.arc(wx, wy, style.size, 0, Math.PI*2); ctx.fill();
-    ctx.shadowBlur  = 0;
+    drawGlyph(obj.kind, wx, wy, style, phase, sunX, sunY);
   }
 }
 
@@ -603,6 +866,7 @@ function frame(realTime) {
   // Background — no transform (stars are screen-fixed)
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   drawBackground();
+  drawShootingStars();
 
   // Scene — pan/zoom applied on top of DPR
   ctx.save();
@@ -616,6 +880,10 @@ function frame(realTime) {
   drawForecastPaths(CX, CY, SCALE);
   drawSceneObjects(CX, CY, SCALE, realTime);
   ctx.restore();
+
+  // Screen-space light effects over the scene, then edge falloff on top.
+  drawSunFlare(panX + (CX + SUN.x * SCALE) * zoom, panY + (CY + SUN.y * SCALE) * zoom);
+  drawVignette();
 
   // Time HUD
   if (simMode && !simPaused) {
@@ -1001,7 +1269,7 @@ if (typeof module !== "undefined") {
     esc,
     effectiveTime,
     findObjectAt,
-    drawPlanets, drawSun, drawMoon,
+    drawPlanets, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,

@@ -1,6 +1,9 @@
 import sys
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import partial
 from math import cos, pi, sin
 
 import numpy as np
@@ -134,6 +137,30 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
     return objects
 
 
+# Deep-space catalogs pulled into every scene (SIMBAD): (slug, kind, limit).
+_DEEP_SPACE_SOURCES = [
+    ("galaxy", "galaxy", 4),
+    ("nebula", "nebula", 3),
+    ("star", "star", 3),
+    ("black_hole", "black_hole", 2),
+    ("quasar", "quasar", 2),
+    ("pulsar", "pulsar", 2),
+    ("supernova_remnant", "supernova_remnant", 2),
+]
+
+
+def _active_satellites(dt: datetime, limit: int) -> list[dict]:
+    """Active satellites from CelesTrak, propagated to `dt`."""
+    if limit <= 0:
+        return []
+    try:
+        resp = _requests.get(f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle", timeout=8)
+        resp.raise_for_status()
+        return _propagate_tles(resp.text, dt, limit=limit, kind="satellite")
+    except Exception:
+        return []
+
+
 def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
     """SIMBAD deep-space objects placed by sky coordinates (RA/Dec).
 
@@ -181,8 +208,23 @@ class ForecastRequest(BaseModel):
 
 
 # ── API routes ────────────────────────────────────────────────────────────────
+# Scenes hit slow external catalogs, so cache each (datetime, limit) result for a
+# short window — repeated loads (panning, re-opening) skip the network entirely.
+_SCENE_TTL_SECONDS = 45.0
+_scene_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def _clear_scene_cache() -> None:
+    _scene_cache.clear()
+
+
 @app.get("/api/scene")
 def get_scene(datetime_str: str | None = None, limit: int = 15):
+    cache_key = (datetime_str, limit)
+    cached = _scene_cache.get(cache_key)
+    if cached and (time.time() - cached[0]) < _SCENE_TTL_SECONDS:
+        return cached[1]
+
     if datetime_str:
         try:
             dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
@@ -206,32 +248,21 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
     except Exception:
         pass
 
-    # Active satellites (fill remaining slots)
+    # The remaining sources are independent, so fetch them concurrently — scene
+    # latency becomes the slowest single source, not the sum of all of them
+    # (active sats + JPL near-Earth + one SIMBAD query per deep-space type).
     remaining = max(0, limit - len(objects))
-    if remaining > 0:
-        active_url = f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle"
-        try:
-            resp = _requests.get(active_url, timeout=8)
-            resp.raise_for_status()
-            objects.extend(
-                _propagate_tles(resp.text, dt, limit=remaining, kind="satellite")
-            )
-        except Exception:
-            pass
-
-    # Near-Earth objects (JPL CAD) — the user's date drives the approach window.
-    objects.extend(_jpl_scene_objects(dt.strftime("%Y-%m-%d"), limit=5))
-
-    # Deep-space catalog objects (SIMBAD) — static over the sim timescale.
-    objects.extend(_simbad_scene_objects("galaxy", "galaxy", limit=4))
-    objects.extend(_simbad_scene_objects("nebula", "nebula", limit=3))
-    objects.extend(_simbad_scene_objects("star", "star", limit=3))
-    objects.extend(_simbad_scene_objects("black_hole", "black_hole", limit=2))
-    objects.extend(_simbad_scene_objects("quasar", "quasar", limit=2))
-    objects.extend(_simbad_scene_objects("pulsar", "pulsar", limit=2))
-    objects.extend(
-        _simbad_scene_objects("supernova_remnant", "supernova_remnant", limit=2)
-    )
+    tasks = [
+        partial(_active_satellites, dt, remaining),
+        partial(_jpl_scene_objects, dt.strftime("%Y-%m-%d"), 5),
+    ]
+    tasks += [
+        partial(_simbad_scene_objects, slug, kind, lim)
+        for slug, kind, lim in _DEEP_SPACE_SOURCES
+    ]
+    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        for result in pool.map(lambda fetch: fetch(), tasks):
+            objects.extend(result)
 
     # Unidentified — position intentionally unknown
     objects.append(
@@ -247,7 +278,9 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
         }
     )
 
-    return {"datetime": dt.isoformat(), "objects": objects}
+    result = {"datetime": dt.isoformat(), "objects": objects}
+    _scene_cache[cache_key] = (time.time(), result)
+    return result
 
 
 @app.get("/api/objects/{object_slug}")
