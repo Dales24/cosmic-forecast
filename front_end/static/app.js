@@ -1178,7 +1178,7 @@ function showObjectInfo(idx) {
   if (classCache[idx]) {
     applyClassification(idx);
   } else {
-    fetch("/api/classify/" + idx)
+    fetch("/api/classify/" + idx + "?kind=" + encodeURIComponent(obj.kind))
       .then(r => r.json())
       .then(data => {
         classCache[idx] = data;

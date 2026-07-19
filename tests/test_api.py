@@ -132,6 +132,23 @@ def test_classify_returns_valid_structure():
     assert "group" in data
 
 
+def test_classify_uses_a_kind_specific_patch():
+    """With a kind, the classified patch is the one characteristic of that kind."""
+    from app.object_classifier import synthetic_patch
+
+    captured = {}
+
+    def capture(model, patch):
+        captured["patch"] = patch
+        return _MOCK_CLASSIFICATION
+
+    with patch("app.api._get_cnn", return_value=MagicMock()):
+        with patch("app.object_classifier.predict_patch", side_effect=capture):
+            r = client.get("/api/classify/0?kind=galaxy")
+    assert r.status_code == 200
+    assert np.array_equal(captured["patch"], synthetic_patch("galaxy", seed=0))
+
+
 def test_classify_deterministic_patch_for_same_id():
     """Same obj_id always generates the same random patch."""
     seen = []

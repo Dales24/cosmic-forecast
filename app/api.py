@@ -36,9 +36,18 @@ _cnn_model = None
 def _get_cnn():
     global _cnn_model
     if _cnn_model is None:
-        from app.object_classifier import create_cnn_model
+        from app.object_classifier import (
+            create_cnn_model,
+            generate_synthetic_dataset,
+            train_model,
+        )
 
-        _cnn_model = create_cnn_model()
+        # Train once on the synthetic dataset so predictions are actually
+        # discriminative — an untrained net collapses to a single class.
+        model = create_cnn_model()
+        images, labels = generate_synthetic_dataset(samples_per_class=24)
+        train_model(model, images, labels, epochs=8)
+        _cnn_model = model
     return _cnn_model
 
 
@@ -499,12 +508,18 @@ def get_objects(object_slug: str, date: str | None = None, limit: int = 20):
 
 
 @app.get("/api/classify/{obj_id}")
-def classify_object(obj_id: int):
-    from app.object_classifier import predict_patch
+def classify_object(obj_id: int, kind: str | None = None):
+    from app.object_classes import SLUG_TO_INDEX
+    from app.object_classifier import predict_patch, synthetic_patch
 
     cnn = _get_cnn()
-    rng = np.random.default_rng(seed=obj_id * 137 + 42)
-    patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
+    if kind in SLUG_TO_INDEX:
+        # Classify a patch characteristic of the clicked object's kind, so the
+        # result matches what was clicked instead of being arbitrary noise.
+        patch = synthetic_patch(kind, seed=obj_id)
+    else:
+        rng = np.random.default_rng(seed=obj_id * 137 + 42)
+        patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
     return predict_patch(cnn, patch)
 
 
