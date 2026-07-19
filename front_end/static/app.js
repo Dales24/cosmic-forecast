@@ -230,10 +230,50 @@ function _staticItem(cls, text) {
   return li;
 }
 
+// ── UI themes ─────────────────────────────────────────────────────────────────
+// Each theme recolours the canvas backdrop (gradient, Milky Way, nebulae) and
+// the star field; the DOM chrome is themed by CSS variables (see style.css).
+// setTheme() swaps both at once. Default = Purple Cosmic.
+const THEMES = {
+  cosmic: {
+    label: "Purple Cosmic",
+    stars: ["#ffffff", "#e8d9ff", "#d6bcff", "#c9a2ff", "#ffcdf2"],
+    grad: ["#1c1046", "#0d0622", "#04010e"],
+    milkyWay: "170, 130, 240",
+    clouds: [
+      { x: .22, y: .30, r: .42, c: "rgba(140, 70, 220, 0.20)" },
+      { x: .78, y: .62, r: .50, c: "rgba(95, 45, 190, 0.18)" },
+      { x: .55, y: .18, r: .34, c: "rgba(205, 60, 180, 0.12)" },
+    ],
+  },
+  vangogh: {
+    label: "Van Gogh",
+    stars: ["#ffe9a8", "#ffd76b", "#fff3cf", "#bcd4ff", "#8fb8f0"],
+    grad: ["#13457f", "#0d2a58", "#07162f"],
+    milkyWay: "245, 205, 90",
+    clouds: [
+      { x: .24, y: .32, r: .46, c: "rgba(70, 130, 210, 0.24)" },
+      { x: .76, y: .60, r: .50, c: "rgba(240, 195, 80, 0.16)" },
+      { x: .55, y: .20, r: .36, c: "rgba(120, 170, 235, 0.18)" },
+    ],
+  },
+  burton: {
+    label: "Tim Burton",
+    stars: ["#eae7d6", "#c7f0a0", "#ffffff", "#b8a9d9", "#9ae66e"],
+    grad: ["#16151d", "#0b0a11", "#030305"],
+    milkyWay: "150, 140, 175",
+    clouds: [
+      { x: .22, y: .30, r: .42, c: "rgba(120, 90, 165, 0.16)" },
+      { x: .78, y: .62, r: .50, c: "rgba(95, 125, 60, 0.14)" },
+      { x: .55, y: .18, r: .34, c: "rgba(60, 60, 72, 0.22)" },
+    ],
+  },
+};
+
+const DEFAULT_THEME = "cosmic";
+let currentTheme = THEMES[DEFAULT_THEME];
+
 // ── Stars & backdrop ──────────────────────────────────────────────────────────
-// Star colours span the stellar temperature range (blue-white → yellow/orange)
-// so the field reads as real starlight, not flat grey.
-const STAR_COLORS = ["#ffffff", "#dbe6ff", "#cfe0ff", "#ffe6c0", "#ffcda0"];
 
 // The static sky (gradient, nebulae, Milky Way, faint stars) is pre-rendered once
 // per resize into an offscreen canvas and blitted each frame; only the brighter
@@ -251,11 +291,13 @@ function buildBackdrop(w, h) {
   backdrop.height = h;
   const b = bctx;
 
+  const t = currentTheme;
+
   // Deep-space gradient.
   const g = b.createRadialGradient(w * .5, h * .42, 0, w * .5, h * .42, Math.max(w, h) * .8);
-  g.addColorStop(0, "#0b1230");
-  g.addColorStop(0.5, "#050817");
-  g.addColorStop(1, "#010208");
+  g.addColorStop(0, t.grad[0]);
+  g.addColorStop(0.5, t.grad[1]);
+  g.addColorStop(1, t.grad[2]);
   b.fillStyle = g;
   b.fillRect(0, 0, w, h);
 
@@ -264,20 +306,15 @@ function buildBackdrop(w, h) {
   b.translate(w * .5, h * .5);
   b.rotate(-0.5);
   const mw = b.createLinearGradient(0, -h * .22, 0, h * .22);
-  mw.addColorStop(0, "rgba(130,150,225,0)");
-  mw.addColorStop(0.5, "rgba(150,165,235,0.10)");
-  mw.addColorStop(1, "rgba(130,150,225,0)");
+  mw.addColorStop(0, `rgba(${t.milkyWay}, 0)`);
+  mw.addColorStop(0.5, `rgba(${t.milkyWay}, 0.10)`);
+  mw.addColorStop(1, `rgba(${t.milkyWay}, 0)`);
   b.fillStyle = mw;
   b.fillRect(-w, -h * .22, w * 2, h * .44);
   b.restore();
 
   // Coloured nebula clouds for depth.
-  const clouds = [
-    { x: .22, y: .30, r: .42, c: "rgba(80,60,165,0.18)" },
-    { x: .78, y: .62, r: .50, c: "rgba(40,95,155,0.16)" },
-    { x: .55, y: .18, r: .34, c: "rgba(150,55,120,0.10)" },
-  ];
-  for (const c of clouds) {
+  for (const c of t.clouds) {
     const rg = b.createRadialGradient(c.x * w, c.y * h, 0, c.x * w, c.y * h, c.r * Math.max(w, h));
     rg.addColorStop(0, c.c);
     rg.addColorStop(1, "rgba(0,0,0,0)");
@@ -297,6 +334,7 @@ function buildBackdrop(w, h) {
 
 function initStars(n) {
   stars.length = 0;
+  const palette = currentTheme.stars;
   for (let i = 0; i < n; i++) {
     // Magnitude 0..1 skewed toward the dim end (power law), so most stars are
     // faint pinpoints and only a few are bright — like a real sky. Size and
@@ -308,7 +346,7 @@ function initStars(n) {
       r: 0.4 + mag * 1.9,
       tw: Math.random() * Math.PI * 2,
       sp: 0.008 + Math.random() * 0.02,
-      color: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
+      color: palette[(Math.random() * palette.length) | 0],
       glint: mag > 0.85,
     });
   }
@@ -965,8 +1003,32 @@ function resize() {
 }
 
 window.addEventListener("resize", () => { resize(); initStars(320); });
-resize();
-initStars(320);
+
+// ── Theme switching ─────────────────────────────────────────────────────────────
+// Swaps the CSS chrome (via a body class) and the canvas palette together, then
+// remembers the choice. Unknown names fall back to the default.
+function setTheme(name) {
+  const key = THEMES[name] ? name : DEFAULT_THEME;
+  currentTheme = THEMES[key];
+  document.body.classList.remove("theme-cosmic", "theme-vangogh", "theme-burton");
+  document.body.classList.add("theme-" + key);
+  const select = document.getElementById("theme-select");
+  if (select && select.value !== key) select.value = key;
+  buildBackdrop(window.innerWidth, window.innerHeight);
+  initStars(320);
+  try { localStorage.setItem("cosmicTheme", key); } catch { /* storage disabled */ }
+  return key;
+}
+
+const _themeSelect = document.getElementById("theme-select");
+if (_themeSelect) {
+  _themeSelect.addEventListener("change", () => setTheme(_themeSelect.value));
+}
+
+resize(); // size the canvas first
+let _savedTheme = null;
+try { _savedTheme = localStorage.getItem("cosmicTheme"); } catch { /* ignore */ }
+setTheme(_savedTheme || DEFAULT_THEME); // paints the themed backdrop + star field
 requestAnimationFrame(frame);
 
 // ── Hit testing ───────────────────────────────────────────────────────────────
@@ -1332,10 +1394,12 @@ if (typeof module !== "undefined") {
   module.exports = {
     // Constants
     KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
+    THEMES, DEFAULT_THEME,
     // Stateless pure functions
     esc,
     effectiveTime,
     findObjectAt,
+    setTheme,
     drawPlanetBody, planetRadius, localBodyObjects, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
@@ -1363,5 +1427,6 @@ if (typeof module !== "undefined") {
     set simStartEff(v)  { simStartEff = v; },
     get forecastPaths() { return forecastPaths; },
     set forecastPaths(v){ forecastPaths = v; },
+    get currentTheme()  { return currentTheme; },
   };
 }

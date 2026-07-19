@@ -9,6 +9,13 @@ document.body.innerHTML = `
   <button id="play-btn">&#9654; Play Simulation</button>
   <div id="sim-time" style="display:none"></div>
   <ul id="legend-list"></ul>
+  <div id="theme-switch">
+    <select id="theme-select">
+      <option value="cosmic">Purple Cosmic</option>
+      <option value="vangogh">Van Gogh</option>
+      <option value="burton">Tim Burton</option>
+    </select>
+  </div>
   <div id="form-view" style="display:block"></div>
   <div id="obj-view"  style="display:none"></div>
   <form id="scene-form">
