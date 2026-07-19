@@ -11,6 +11,7 @@ document.body.innerHTML = `
   <ul id="legend-list"></ul>
   <div id="theme-switch">
     <select id="theme-select">
+      <option value="default">Default</option>
       <option value="cosmic">Purple Cosmic</option>
       <option value="vangogh">Van Gogh</option>
       <option value="burton">Tim Burton</option>

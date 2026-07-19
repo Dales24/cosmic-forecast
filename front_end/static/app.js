@@ -190,9 +190,10 @@ function updateLegend() {
   const counts = {};
   for (const o of sceneObjects) counts[o.kind] = (counts[o.kind] || 0) + 1;
 
-  for (const [kind, style] of Object.entries(KIND_STYLES)) {
+  for (const kind of Object.keys(KIND_STYLES)) {
     if (!counts[kind]) continue;
-    const li = _legendItem(kind, "●", style.color, KIND_NAMES[kind] || kind, counts[kind]);
+    const color = kindStyle(kind).color;
+    const li = _legendItem(kind, "●", color, KIND_NAMES[kind] || kind, counts[kind]);
     li.classList.add("kind-filter");
     if (filterKind === kind) li.classList.add("active");
     li.addEventListener("click", () => {
@@ -233,10 +234,23 @@ function _staticItem(cls, text) {
 // ── UI themes ─────────────────────────────────────────────────────────────────
 // Each theme recolours the canvas backdrop (gradient, Milky Way, nebulae) and
 // the star field; the DOM chrome is themed by CSS variables (see style.css).
-// setTheme() swaps both at once. Default = Purple Cosmic.
+// setTheme() swaps both at once. Default = the classic blue.
 const THEMES = {
+  default: {
+    label: "Default",
+    objectTint: null, // objects keep their natural per-kind colours
+    stars: ["#ffffff", "#dbe6ff", "#cfe0ff", "#ffe6c0", "#ffcda0"],
+    grad: ["#0b1230", "#050817", "#010208"],
+    milkyWay: "150, 165, 235",
+    clouds: [
+      { x: .22, y: .30, r: .42, c: "rgba(80, 60, 165, 0.18)" },
+      { x: .78, y: .62, r: .50, c: "rgba(40, 95, 155, 0.16)" },
+      { x: .55, y: .18, r: .34, c: "rgba(150, 55, 120, 0.10)" },
+    ],
+  },
   cosmic: {
     label: "Purple Cosmic",
+    objectTint: { color: "#b794f6", amount: 0.15 },
     stars: ["#ffffff", "#e8d9ff", "#d6bcff", "#c9a2ff", "#ffcdf2"],
     grad: ["#1c1046", "#0d0622", "#04010e"],
     milkyWay: "170, 130, 240",
@@ -248,6 +262,7 @@ const THEMES = {
   },
   vangogh: {
     label: "Van Gogh",
+    objectTint: { color: "#f4c430", amount: 0.32 },
     stars: ["#ffe9a8", "#ffd76b", "#fff3cf", "#bcd4ff", "#8fb8f0"],
     grad: ["#13457f", "#0d2a58", "#07162f"],
     milkyWay: "245, 205, 90",
@@ -259,6 +274,7 @@ const THEMES = {
   },
   burton: {
     label: "Tim Burton",
+    objectTint: { color: "#b8a9d9", amount: 0.42 },
     stars: ["#eae7d6", "#c7f0a0", "#ffffff", "#b8a9d9", "#9ae66e"],
     grad: ["#16151d", "#0b0a11", "#030305"],
     milkyWay: "150, 140, 175",
@@ -270,6 +286,7 @@ const THEMES = {
   },
   pirate: {
     label: "Pirate",
+    objectTint: { color: "#d9a441", amount: 0.42 },
     stars: ["#fff4d0", "#f5d98a", "#ffe9a8", "#d9b36a", "#bfa878"],
     grad: ["#2a1d0c", "#150d04", "#070401"],
     milkyWay: "210, 175, 95",
@@ -281,8 +298,29 @@ const THEMES = {
   },
 };
 
-const DEFAULT_THEME = "cosmic";
+const DEFAULT_THEME = "default";
 let currentTheme = THEMES[DEFAULT_THEME];
+
+// Blend two "#rrggbb" colours; t=0 → a, t=1 → b.
+function mixHex(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const mix = (sh) => {
+    const ca = (pa >> sh) & 255, cb = (pb >> sh) & 255;
+    return Math.round(ca + (cb - ca) * t);
+  };
+  const r = mix(16), g = mix(8), bl = mix(0);
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+}
+
+// A kind's glyph style, tinted toward the active theme so on-canvas objects
+// match the palette. Kinds stay distinguishable (each keeps its own base hue,
+// nudged toward the theme's tint); the default theme applies no tint.
+function kindStyle(kind) {
+  const base = KIND_STYLES[kind] || { size: 3, color: "#e2e8f0" };
+  const tint = currentTheme.objectTint;
+  if (!tint || !tint.amount) return base;
+  return { size: base.size, color: mixHex(base.color, tint.color, tint.amount) };
+}
 
 // ── Stars & backdrop ──────────────────────────────────────────────────────────
 
@@ -736,7 +774,7 @@ function drawForecastPaths(cx, cy, scale) {
     const obj = sceneObjects[p.id];
     if (!obj) continue;
     if (filterKind && obj.kind !== filterKind) continue;
-    const style = KIND_STYLES[obj.kind] || { color: "#e2e8f0" };
+    const style = kindStyle(obj.kind);
     ctx.globalAlpha = 0.45;
     ctx.strokeStyle = style.color;
     ctx.beginPath();
@@ -915,7 +953,7 @@ function drawSceneObjects(cx, cy, scale, realTime) {
 
   for (let i = 0; i < sceneObjects.length; i++) {
     const obj   = sceneObjects[i];
-    const style = KIND_STYLES[obj.kind] || { size: 3, color: "#e2e8f0" };
+    const style = kindStyle(obj.kind);
 
     if (filterKind && obj.kind !== filterKind) {
       objPositions[i] = { x: -9999, y: -9999 }; // off-screen so hit test skips
@@ -1027,13 +1065,21 @@ function setTheme(name) {
   if (select && select.value !== key) select.value = key;
   buildBackdrop(window.innerWidth, window.innerHeight);
   initStars(320);
+  updateLegend(); // recolour legend swatches for the new palette
   try { localStorage.setItem("cosmicTheme", key); } catch { /* storage disabled */ }
   return key;
 }
 
+// Bridge for auth.js: apply a theme saved on the user's profile.
+window.cosmicSetTheme = setTheme;
+
 const _themeSelect = document.getElementById("theme-select");
 if (_themeSelect) {
-  _themeSelect.addEventListener("change", () => setTheme(_themeSelect.value));
+  _themeSelect.addEventListener("change", () => {
+    const key = setTheme(_themeSelect.value);
+    // A user-initiated change — let auth.js persist it to the profile.
+    document.dispatchEvent(new CustomEvent("cosmic:themechange", { detail: key }));
+  });
 }
 
 resize(); // size the canvas first
@@ -1410,7 +1456,7 @@ if (typeof module !== "undefined") {
     esc,
     effectiveTime,
     findObjectAt,
-    setTheme,
+    setTheme, kindStyle, mixHex,
     drawPlanetBody, planetRadius, localBodyObjects, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,

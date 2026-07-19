@@ -37,10 +37,23 @@ DEEP_SPACE_OBJECTS = (
     ObjectClass("Supernova Remnant", "supernova_remnant", "deep_space"),
 )
 
+# Solar-system bodies rendered as their own scene objects (Sun, Earth, Moon,
+# and the planets), so each is a first-class classification target too.
+SOLAR_SYSTEM_OBJECTS = (
+    ObjectClass("Planet", "planet", "solar_system"),
+    ObjectClass("Sun", "sun", "solar_system"),
+    ObjectClass("Moon", "moon", "solar_system"),
+    ObjectClass("Earth", "earth", "solar_system"),
+)
+
 UNKNOWN_OBJECTS = (ObjectClass("Unidentified", "ufo", "unknown"),)
 
 OBJECT_CLASSES = (
-    NATURAL_OBJECTS + ARTIFICIAL_OBJECTS + DEEP_SPACE_OBJECTS + UNKNOWN_OBJECTS
+    NATURAL_OBJECTS
+    + ARTIFICIAL_OBJECTS
+    + DEEP_SPACE_OBJECTS
+    + SOLAR_SYSTEM_OBJECTS
+    + UNKNOWN_OBJECTS
 )
 NUM_CLASSES = len(OBJECT_CLASSES)
 CLASS_NAMES = [obj.name for obj in OBJECT_CLASSES]

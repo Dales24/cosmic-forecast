@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
     email         TEXT,
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
-    created_at    TEXT NOT NULL
+    created_at    TEXT NOT NULL,
+    theme         TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -65,9 +66,17 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     if path not in _initialized:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         conn.commit()
         _initialized.add(path)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns that post-date the original schema, for existing databases."""
+    user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "theme" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN theme TEXT")
 
 
 def _now() -> str:
@@ -98,6 +107,13 @@ def get_user_by_username(username: str) -> Optional[sqlite3.Row]:
 def get_user_by_id(user_id: int) -> Optional[sqlite3.Row]:
     with closing(get_conn()) as conn:
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+
+def set_user_theme(user_id: int, theme: str) -> None:
+    """Persist the user's chosen UI theme to their profile."""
+    with closing(get_conn()) as conn:
+        conn.execute("UPDATE users SET theme = ? WHERE id = ?", (theme, user_id))
+        conn.commit()
 
 
 # ── sessions ──────────────────────────────────────────────────────────────────

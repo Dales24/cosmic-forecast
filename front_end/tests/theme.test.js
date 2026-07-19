@@ -7,7 +7,7 @@ const app = global._app;
 
 describe('THEMES data', () => {
   test('the named themes exist with a palette', () => {
-    for (const key of ['cosmic', 'vangogh', 'burton', 'pirate']) {
+    for (const key of ['default', 'cosmic', 'vangogh', 'burton', 'pirate']) {
       const t = app.THEMES[key];
       expect(t).toBeDefined();
       expect(t.label).toBeTruthy();
@@ -17,8 +17,53 @@ describe('THEMES data', () => {
     }
   });
 
-  test('the default theme is one of the three', () => {
-    expect(app.THEMES[app.DEFAULT_THEME]).toBeDefined();
+  test('the app default is the classic "default" theme', () => {
+    expect(app.DEFAULT_THEME).toBe('default');
+    expect(app.THEMES.default).toBeDefined();
+  });
+});
+
+describe('object theming (kindStyle)', () => {
+  test('the default theme leaves object colours untouched', () => {
+    app.setTheme('default');
+    expect(app.kindStyle('satellite').color).toBe(app.KIND_STYLES.satellite.color);
+  });
+
+  test('a tinted theme shifts object colours toward the theme', () => {
+    app.setTheme('pirate');
+    const themed = app.kindStyle('satellite').color;
+    expect(themed).not.toBe(app.KIND_STYLES.satellite.color);
+    // The tinted colour is the base blended toward the theme's tint colour.
+    const tint = app.THEMES.pirate.objectTint;
+    const expected = app.mixHex(
+      app.KIND_STYLES.satellite.color, tint.color, tint.amount,
+    );
+    expect(themed).toBe(expected);
+    expect(themed).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  test('kindStyle keeps the base size', () => {
+    app.setTheme('vangogh');
+    expect(app.kindStyle('satellite').size).toBe(app.KIND_STYLES.satellite.size);
+  });
+});
+
+describe('profile bridge', () => {
+  test('exposes window.cosmicSetTheme for auth.js to apply a saved theme', () => {
+    expect(typeof window.cosmicSetTheme).toBe('function');
+    window.cosmicSetTheme('burton');
+    expect(app.currentTheme).toBe(app.THEMES.burton);
+  });
+
+  test('a user dropdown change emits cosmic:themechange for persistence', () => {
+    const select = document.getElementById('theme-select');
+    let captured = null;
+    document.addEventListener(
+      'cosmic:themechange', (e) => { captured = e.detail; }, { once: true },
+    );
+    select.value = 'pirate';
+    select.dispatchEvent(new Event('change'));
+    expect(captured).toBe('pirate');
   });
 });
 

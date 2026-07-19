@@ -1,8 +1,20 @@
 /* ── Theme palettes ──────────────────────────────────────────────────────────
    The whole UI is driven by these variables; a theme swaps the palette and the
    chrome (panel, legend, controls, inputs) re-colours. The canvas backdrop is
-   themed separately in app.js (see THEMES). Default = Purple Cosmic. */
+   themed separately in app.js (see THEMES). Default = the classic blue. */
 :root,
+.theme-default {
+  --bg: #02040a;
+  --text: #dce6ff;
+  --text-dim: #8ea8d8;
+  --accent: #8eb4ff;
+  --accent-strong: #6ea0ff;
+  --accent-rgb: 120, 160, 255;
+  --accent2: #c084fc;
+  --btn-a: #3d6bff;
+  --btn-b: #6b4dff;
+}
+
 .theme-cosmic {
   --bg: #060314;
   --text: #ece4ff;
@@ -420,10 +432,11 @@ input[type="submit"]:hover { filter: brightness(1.08); }
   letter-spacing: 0.05em;
 }
 
-.badge-natural    { background: rgba(100,200,100,0.15); color: #7ee787; border: 1px solid rgba(100,200,100,0.3); }
-.badge-artificial { background: rgba(100,150,255,0.15); color: #93c5fd; border: 1px solid rgba(100,150,255,0.3); }
-.badge-deep_space { background: rgba(167,139,250,0.15); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
-.badge-unknown    { background: rgba(0,255,136,0.10);   color: #00ff88; border: 1px solid rgba(0,255,136,0.3); }
+.badge-natural      { background: rgba(100,200,100,0.15); color: #7ee787; border: 1px solid rgba(100,200,100,0.3); }
+.badge-artificial   { background: rgba(100,150,255,0.15); color: #93c5fd; border: 1px solid rgba(100,150,255,0.3); }
+.badge-deep_space   { background: rgba(167,139,250,0.15); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
+.badge-solar_system { background: rgba(255,200,90,0.15);  color: #ffcf5a; border: 1px solid rgba(255,200,90,0.3); }
+.badge-unknown      { background: rgba(0,255,136,0.10);   color: #00ff88; border: 1px solid rgba(0,255,136,0.3); }
 
 .hint {
   margin-top: 1.2rem;

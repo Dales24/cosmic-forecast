@@ -82,6 +82,30 @@ def test_logout_invalidates_token(client):
     assert client.get("/api/auth/me", headers=headers).status_code == 401
 
 
+# ── theme preference ──────────────────────────────────────────────────────────
+def test_theme_defaults_to_none(client):
+    headers = _auth(client, "nina")
+    assert client.get("/api/auth/me", headers=headers).json()["theme"] is None
+
+
+def test_save_theme_persists_to_profile(client):
+    headers = _auth(client, "opal")
+    r = client.put("/api/preferences", json={"theme": "pirate"}, headers=headers)
+    assert r.status_code == 200 and r.json()["theme"] == "pirate"
+    # The saved theme comes back on the profile.
+    assert client.get("/api/auth/me", headers=headers).json()["theme"] == "pirate"
+
+
+def test_save_theme_requires_auth(client):
+    assert client.put("/api/preferences", json={"theme": "pirate"}).status_code == 401
+
+
+def test_save_theme_rejects_empty(client):
+    headers = _auth(client, "pearl")
+    r = client.put("/api/preferences", json={"theme": "   "}, headers=headers)
+    assert r.status_code == 422
+
+
 # ── saved searches ────────────────────────────────────────────────────────────
 def test_save_list_and_delete_search(client):
     headers = _auth(client, "grace")

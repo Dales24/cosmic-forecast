@@ -1,3 +1,8 @@
+# TensorFlow (imported lazily by the CNN/forecast modules) reaches for the
+# stdlib `distutils`, which Python 3.12 removed; importing setuptools first
+# restores the compatibility shim. Must precede any tensorflow import.
+import setuptools  # noqa: F401
+
 import sys
 import os
 import time
@@ -544,8 +549,17 @@ class UploadIn(BaseModel):
     kind: str | None = None
 
 
+class PreferencesIn(BaseModel):
+    theme: str
+
+
 def _public_user(user) -> dict:
-    return {"id": user["id"], "username": user["username"], "email": user["email"]}
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "email": user["email"],
+        "theme": user["theme"],
+    }
 
 
 @app.post("/api/auth/register")
@@ -567,6 +581,16 @@ def api_logout(authorization: str = Header(default="")):
 @app.get("/api/auth/me")
 def api_me(user=Depends(auth.current_user)):
     return _public_user(user)
+
+
+@app.put("/api/preferences")
+def api_set_preferences(body: PreferencesIn, user=Depends(auth.current_user)):
+    """Save the user's current UI theme as their profile default."""
+    theme = body.theme.strip()
+    if not theme:
+        raise HTTPException(422, "theme must not be empty")
+    db.set_user_theme(user["id"], theme)
+    return {"theme": theme}
 
 
 @app.get("/api/searches")

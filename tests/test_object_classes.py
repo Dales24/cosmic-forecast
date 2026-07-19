@@ -14,6 +14,7 @@ from app.object_classes import (
     OBJECT_CLASSES,
     ObjectClass,
     SLUG_TO_INDEX,
+    SOLAR_SYSTEM_OBJECTS,
     UNKNOWN_OBJECTS,
 )
 
@@ -25,7 +26,7 @@ def test_num_classes_matches_object_classes():
 
 
 def test_total_class_count():
-    assert NUM_CLASSES == 19
+    assert NUM_CLASSES == 23
 
 
 def test_natural_objects_count():
@@ -38,6 +39,10 @@ def test_artificial_objects_count():
 
 def test_deep_space_objects_count():
     assert len(DEEP_SPACE_OBJECTS) == 9
+
+
+def test_solar_system_objects_count():
+    assert len(SOLAR_SYSTEM_OBJECTS) == 4
 
 
 def test_unknown_objects_count():
@@ -57,6 +62,10 @@ def test_artificial_objects_have_artificial_group():
 
 def test_deep_space_objects_have_deep_space_group():
     assert all(o.group == "deep_space" for o in DEEP_SPACE_OBJECTS)
+
+
+def test_solar_system_objects_have_solar_system_group():
+    assert all(o.group == "solar_system" for o in SOLAR_SYSTEM_OBJECTS)
 
 
 def test_unknown_objects_have_unknown_group():
@@ -111,8 +120,48 @@ def test_deep_space_slugs_present(slug):
     assert slug in CLASS_SLUGS
 
 
+@pytest.mark.parametrize("slug", ["planet", "sun", "moon", "earth"])
+def test_solar_system_slugs_present(slug):
+    assert slug in CLASS_SLUGS
+
+
 def test_ufo_slug_present():
     assert "ufo" in CLASS_SLUGS
+
+
+# Every object kind that can appear in / be clicked in a scene — the backend
+# scene assembly plus the frontend-injected Sun/Earth/Moon — must have a
+# classification, so clicking any object yields a real class and group badge.
+_SCENE_KINDS = {
+    "iss",
+    "satellite",
+    "space_debris",
+    "rocket_body",
+    "asteroid",
+    "comet",
+    "meteor",
+    "meteoroid",
+    "near_earth_object",
+    "galaxy",
+    "nebula",
+    "star_cluster",
+    "variable_star",
+    "star",
+    "black_hole",
+    "quasar",
+    "pulsar",
+    "supernova_remnant",
+    "planet",
+    "sun",
+    "moon",
+    "earth",
+    "ufo",
+}
+
+
+def test_every_scene_kind_has_a_classification():
+    missing = _SCENE_KINDS - set(CLASS_SLUGS)
+    assert not missing, f"scene kinds without a classification: {sorted(missing)}"
 
 
 # ── Uniqueness ────────────────────────────────────────────────────────────────
