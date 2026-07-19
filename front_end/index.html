@@ -9,6 +9,12 @@
 <body>
   <canvas id="space-map" aria-label="Space orbital map"></canvas>
 
+  <!-- Top-left navigation -->
+  <nav class="top-nav">
+    <a href="/help">Help</a>
+    <a href="/profile">Profile</a>
+  </nav>
+
   <!-- Account bar (populated by auth.js) -->
   <div id="auth-bar" class="auth-bar"></div>
 
@@ -171,7 +177,13 @@
             <span class="key">Type</span>
             <span class="val" id="obj-kind">&#8212;</span>
           </div>
-          <p class="obj-desc" id="obj-desc" style="display:none"></p>
+        </div>
+
+        <div class="obj-section" id="obj-about">
+          <div class="obj-section-title">About</div>
+          <p class="obj-desc" id="obj-desc"></p>
+          <!-- Placeholder link — point at a real per-object info source later. -->
+          <a class="obj-info-link" id="obj-info-link" href="#" rel="noopener">Further info &rarr;</a>
         </div>
 
         <p class="hint">Press <strong>&#9654; Play Simulation</strong> to fast-forward paths and see ML-predicted trajectories.</p>

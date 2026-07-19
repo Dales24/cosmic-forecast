@@ -51,6 +51,35 @@ const KIND_NAMES = {
   ufo:               "Unidentified \u{1F47D}",
 };
 
+// One-line fact shown in the detail panel. Solar-system bodies (Sun/Earth/Moon
+// and the named planets) carry their own per-object description from the scene,
+// which takes precedence; this is the per-kind fallback for everything else.
+const KIND_FACTS = {
+  iss:               "A crewed space station orbiting ~400 km up, circling Earth roughly every 90 minutes.",
+  satellite:         "An artificial object placed in orbit for communication, navigation, imaging, or research.",
+  space_debris:      "Defunct human-made fragments — spent stages, dead satellites, collision shards — still in orbit.",
+  rocket_body:       "A spent rocket stage left in orbit after delivering its payload.",
+  asteroid:          "A rocky remnant of the early solar system, most orbiting between Mars and Jupiter.",
+  comet:             "An icy body that grows a glowing coma and tail when the Sun's heat vaporizes its surface.",
+  near_earth_object: "An asteroid or comet whose orbit brings it close to Earth's neighborhood.",
+  meteor:            "The streak of light from a small particle burning up in Earth's atmosphere.",
+  meteoroid:         "A small rock or metal fragment traveling through space, smaller than an asteroid.",
+  galaxy:            "A gravitationally bound system of billions of stars, gas, dust, and dark matter.",
+  nebula:            "A vast cloud of gas and dust — often a stellar nursery or the remains of a dying star.",
+  star_cluster:      "A group of stars born from the same cloud and held together by gravity.",
+  variable_star:     "A star whose brightness changes over time — from pulsation, eclipses, or eruptions.",
+  star:              "A luminous sphere of plasma held together by gravity and powered by nuclear fusion.",
+  black_hole:        "A region where gravity is so strong that not even light can escape.",
+  quasar:            "The blazing core of a distant galaxy, powered by a supermassive black hole devouring matter.",
+  pulsar:            "A rapidly spinning neutron star sweeping beams of radiation past Earth like a lighthouse.",
+  supernova_remnant: "The expanding shell of gas and dust left behind by a stellar explosion.",
+  planet:            "A world orbiting the Sun, round under its own gravity and clearing its orbital path.",
+  sun:               "The star at the center of the solar system, powering light and life on Earth.",
+  earth:             "Our home planet — the only known world with liquid-water oceans and life.",
+  moon:              "Earth's only natural satellite, whose gravity drives the ocean tides.",
+  ufo:               "An object with no catalogued match — origin unknown.",
+};
+
 // Decorative orbital guide rings (visual only, not tied to real orbits)
 const orbits = [
   { radius: 0.14, tilt:  0.2  },
@@ -1131,13 +1160,13 @@ function showObjectInfo(idx) {
     ? (speed * 42164).toFixed(2) + " km/s" : "—";
   document.getElementById("obj-kind").textContent   = KIND_NAMES[obj.kind] || obj.kind;
 
+  // A fact for the object: its own description (solar-system bodies) if present,
+  // otherwise the per-kind fallback.
+  const fact = obj.description || KIND_FACTS[obj.kind] || "";
   const descEl = document.getElementById("obj-desc");
-  if (obj.description) {
-    descEl.textContent = obj.description;
-    descEl.style.display = "block";
-  } else {
-    descEl.style.display = "none";
-  }
+  const aboutEl = document.getElementById("obj-about");
+  if (descEl) descEl.textContent = fact;
+  if (aboutEl) aboutEl.style.display = fact ? "block" : "none";
 
   document.getElementById("obj-class").textContent  = "Loading…";
   document.getElementById("obj-conf").textContent   = "—";
@@ -1450,7 +1479,7 @@ async function handleCSVUpload(file) {
 if (typeof module !== "undefined") {
   module.exports = {
     // Constants
-    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
+    KIND_STYLES, KIND_NAMES, KIND_FACTS, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
     THEMES, DEFAULT_THEME,
     // Stateless pure functions
     esc,

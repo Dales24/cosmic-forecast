@@ -636,6 +636,16 @@ def index():
     return FileResponse(os.path.join(_front_end, "index.html"))
 
 
+@app.get("/help")
+def help_page():
+    return FileResponse(os.path.join(_front_end, "help.html"))
+
+
+@app.get("/profile")
+def profile_page():
+    return FileResponse(os.path.join(_front_end, "profile.html"))
+
+
 if __name__ == "__main__":
     import uvicorn
 

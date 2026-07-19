@@ -39,7 +39,10 @@ document.body.innerHTML = `
   <div id="obj-orbit"></div>
   <div id="obj-radius"></div>
   <div id="obj-kind"></div>
-  <p id="obj-desc" style="display:none"></p>
+  <div id="obj-about">
+    <p id="obj-desc"></p>
+    <a id="obj-info-link" href="#">Further info &rarr;</a>
+  </div>
   <div id="upload-zone"></div>
   <input id="img-upload" type="file">
   <div id="upload-result" style="display:none"></div>

@@ -45,6 +45,20 @@ def test_index_returns_html():
     assert "text/html" in r.headers["content-type"]
 
 
+def test_help_page_served():
+    r = client.get("/help")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "Help" in r.text
+
+
+def test_profile_page_served():
+    r = client.get("/profile")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "Profile" in r.text
+
+
 # ── GET /api/objects/{object_slug} ────────────────────────────────────────────
 
 
