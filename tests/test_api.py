@@ -394,9 +394,9 @@ def test_jpl_scene_objects_placement_and_schema():
     obj = objs[0]
     assert obj["kind"] == "near_earth_object"
     assert obj["source"] == "jpl"
-    # Symbolic placement lands inside the canvas (radius 0.6–0.95).
+    # Real approach distance sets the radius on the shared scale (inside the rim).
     radius = (obj["x_norm"] ** 2 + obj["y_norm"] ** 2) ** 0.5
-    assert 0.6 <= radius <= 0.95
+    assert 0.10 <= radius <= 0.95
 
 
 def test_jpl_scene_objects_tolerates_missing_dist():
@@ -421,9 +421,11 @@ def test_simbad_scene_objects_maps_radec_to_canvas():
     assert len(objs) == 1
     obj = objs[0]
     assert obj["kind"] == "galaxy"
-    # RA 180 -> x 0, Dec 0 -> y 0.
-    assert obj["x_norm"] == pytest.approx(0.0)
-    assert obj["y_norm"] == pytest.approx(0.0)
+    # Angle is real RA (180° -> pointing -x), on the outer sky band (dec 0).
+    radius = (obj["x_norm"] ** 2 + obj["y_norm"] ** 2) ** 0.5
+    assert radius == pytest.approx(0.95, abs=0.01)
+    assert obj["x_norm"] == pytest.approx(-0.95, abs=0.01)
+    assert obj["y_norm"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_simbad_scene_objects_skips_rows_without_coords():
@@ -451,28 +453,24 @@ def test_planet_scene_objects_schema_and_placement():
             "y_norm",
             "vx_norm",
             "vy_norm",
+            "speed_kms",
             "source",
             "description",
         ):
             assert field in obj, f"missing {field}"
         assert obj["kind"] == "planet"
-        assert obj["source"] == "solar_system"
+        assert obj["source"] == "ephemeris"
         assert obj["description"]
-        # Every orbit lands inside the visible ring band.
+        # Every planet lands inside the shared radial scale.
         radius = (obj["x_norm"] ** 2 + obj["y_norm"] ** 2) ** 0.5
-        assert 0.30 <= radius <= 0.94
-
-    # Outer planets sit on wider rings than inner ones.
-    radii = [(o["x_norm"] ** 2 + o["y_norm"] ** 2) ** 0.5 for o in objs]
-    assert radii == sorted(radii)
+        assert 0.10 <= radius <= 0.95
 
 
-def test_planet_velocity_matches_real_speed():
-    # Mercury's mean orbital velocity is 47.4 km/s; the panel recovers it from
-    # the normalised velocity via the same _NORM_KM factor.
+def test_planet_velocity_shows_real_orbital_speed():
+    # Mercury's mean orbital speed (~47.4 km/s) is reported for the panel.
     mercury = _planet_scene_objects(datetime(2025, 1, 1, tzinfo=timezone.utc))[0]
-    speed = (mercury["vx_norm"] ** 2 + mercury["vy_norm"] ** 2) ** 0.5
-    assert speed * 42164.0 == pytest.approx(47.4, abs=0.5)
+    assert mercury["name"] == "Mercury"
+    assert mercury["speed_kms"] == pytest.approx(47.4)
 
 
 def test_planet_positions_advance_with_date():
@@ -648,21 +646,21 @@ def test_propagate_tles_produces_valid_position():
     assert abs(obj["y_norm"]) < 1.0
 
 
-def test_propagate_tles_normalised_by_geo():
-    """ISS at ~400 km altitude should give |r_norm| ≈ 0.16 (LEO/GEO ratio)."""
+def test_propagate_tles_radius_in_leo_band():
+    """The ISS (~420 km up) lands in the innermost LEO band of the scale."""
     dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     result = _propagate_tles(_ISS_TLE, dt, limit=1, kind="iss")
     r_norm = (result[0]["x_norm"] ** 2 + result[0]["y_norm"] ** 2) ** 0.5
-    assert 0.12 < r_norm < 0.22  # ISS LEO bracket
+    assert 0.10 <= r_norm < 0.13
 
 
-def test_propagate_tles_returns_velocity():
+def test_propagate_tles_reports_real_speed_and_motion():
     dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    result = _propagate_tles(_ISS_TLE, dt, limit=1, kind="iss")
-    obj = result[0]
-    speed = (obj["vx_norm"] ** 2 + obj["vy_norm"] ** 2) ** 0.5
-    # ISS speed ~7.7 km/s → /42164 ≈ 1.8e-4 units/s
-    assert 1e-4 < speed < 5e-4
+    obj = _propagate_tles(_ISS_TLE, dt, limit=1, kind="iss")[0]
+    # Real ISS orbital speed is ~7.66 km/s (shown in the panel).
+    assert obj["speed_kms"] == pytest.approx(7.66, abs=0.3)
+    # It also carries a non-zero scene velocity so the animation sweeps it round.
+    assert (obj["vx_norm"] ** 2 + obj["vy_norm"] ** 2) ** 0.5 > 0
 
 
 def test_propagate_tles_respects_limit():

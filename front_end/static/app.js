@@ -178,8 +178,8 @@ async function loadScene(datetimeISO) {
     const qs   = datetimeISO ? "?datetime_str=" + encodeURIComponent(datetimeISO) : "";
     const resp = await fetch("/api/scene" + qs);
     const data = await resp.json();
-    // Append the Sun/Earth/Moon so they're clickable alongside catalog objects.
-    sceneObjects = (data.objects || []).concat(localBodyObjects());
+    sceneObjects = data.objects || [];
+    syncLocalBodies(); // point the Sun/Moon artwork at their real positions
   } catch {
     // keep whatever we had
   }
@@ -762,25 +762,27 @@ function drawMoon(cx, cy, scale) {
   ctx.restore();
 }
 
-// The Sun, Earth, and Moon are drawn separately (they anchor the scene's
-// composition and lighting), but they should be clickable like everything else.
-// These objects carry the standard scene schema plus a `disc_r` (scale-units
-// radius) and a description, placed to line up with where each body is drawn.
-// Velocity is zero so they stay pinned to their drawn positions during Play.
-function localBodyObjects() {
-  const body = (name, kind, x, y, disc_r, description) => ({
-    id: "body-" + name, name, kind,
-    x_norm: x, y_norm: y, vx_norm: 0, vy_norm: 0,
-    source: "solar_system", disc_r, description,
-  });
-  return [
-    body("Sun", "sun", SUN.x, SUN.y, SUN.r,
-      "The star at the heart of the solar system; its fusion powers the light and warmth that make Earth habitable."),
-    body("Earth", "earth", 0, 0, EARTH_DISC_R,
-      "Our home planet — the only known world with liquid-water oceans and life, and the vantage point for this map."),
-    body("Moon", "moon", MOON.x, MOON.y, MOON.r,
-      "Earth's only natural satellite; its gravity drives the ocean tides and it always shows us the same face."),
-  ];
+// The Sun, Earth, and Moon come from the scene at their real positions but are
+// drawn by their own artwork (drawSun/drawEarth/drawMoon). Point the render
+// constants at the scene's Sun/Moon so the drawing — and the Sun-based lighting
+// (Moon phase, sun flare) — follows their true positions. Earth stays centred.
+function syncLocalBodies() {
+  const sun = sceneObjects.find((o) => o.kind === "sun");
+  const moon = sceneObjects.find((o) => o.kind === "moon");
+  if (sun)  { SUN.x = sun.x_norm; SUN.y = sun.y_norm; }
+  if (moon) { MOON.x = moon.x_norm; MOON.y = moon.y_norm; }
+}
+
+// A body's disc radius in scene-scale units (0 for glyph objects), for
+// hit-testing and selection halos.
+function bodyDiscR(obj) {
+  switch (obj.kind) {
+    case "planet": return planetRadius(obj.name);
+    case "sun":    return SUN.r;
+    case "earth":  return EARTH_DISC_R;
+    case "moon":   return MOON.r;
+    default:       return 0;
+  }
 }
 
 function drawOrbitalPaths(cx, cy, scale) {
@@ -995,12 +997,10 @@ function drawSceneObjects(cx, cy, scale, realTime) {
 
     // Planets and the Sun/Earth/Moon are drawn as sized discs, so their
     // clickable/halo radius is the disc itself; small glyphs use their size.
-    const isPlanet = obj.kind === "planet";
-    const isLocalBody = obj.disc_r !== undefined; // Sun/Earth/Moon
-    const vr = isPlanet ? planetRadius(obj.name) * scale
-             : isLocalBody ? obj.disc_r * scale
-             : style.size;
-    objPositions[i] = { x: wx, y: wy, hit: (isPlanet || isLocalBody) ? vr : 0 };
+    const discR = bodyDiscR(obj); // scale-units, 0 for glyph objects
+    const isBody = discR > 0;
+    const vr = isBody ? discR * scale : style.size;
+    objPositions[i] = { x: wx, y: wy, hit: isBody ? vr : 0 };
 
     // Motion trail for objects that actually move, only while the sim runs.
     if (moving && (obj.vx_norm || obj.vy_norm)) {
@@ -1022,10 +1022,10 @@ function drawSceneObjects(cx, cy, scale, realTime) {
       ctx.globalAlpha = 1;
     }
 
-    if (isPlanet) {
+    if (obj.kind === "planet") {
       drawPlanetBody(obj.name, wx, wy, scale);
-    } else if (!isLocalBody) {
-      // Sun/Earth/Moon are already painted by their own draw functions.
+    } else if (!isBody) {
+      // Sun/Earth/Moon are painted by their own draw functions in frame().
       drawGlyph(obj.kind, wx, wy, style, phase, sunX, sunY);
     }
   }
@@ -1148,7 +1148,6 @@ function showObjectInfo(idx) {
   const yn   = obj.y_norm;
   const dist = Math.hypot(xn, yn);
   const az   = (Math.atan2(yn, xn) * 180 / Math.PI).toFixed(1);
-  const speed = Math.hypot(obj.vx_norm || 0, obj.vy_norm || 0);
 
   document.getElementById("obj-title").textContent  = obj.name || ("Object #" + (idx + 1));
   document.getElementById("obj-x").textContent      = (xn >= 0 ? "+" : "") + xn.toFixed(4) + " u";
@@ -1156,8 +1155,8 @@ function showObjectInfo(idx) {
   document.getElementById("obj-dist").textContent   = dist.toFixed(4) + " u";
   document.getElementById("obj-az").textContent     = az + "°";
   document.getElementById("obj-orbit").textContent  = obj.source || "—";
-  document.getElementById("obj-radius").textContent = speed > 0
-    ? (speed * 42164).toFixed(2) + " km/s" : "—";
+  document.getElementById("obj-radius").textContent = obj.speed_kms
+    ? obj.speed_kms.toFixed(2) + " km/s" : "—";
   document.getElementById("obj-kind").textContent   = KIND_NAMES[obj.kind] || obj.kind;
 
   // A fact for the object: its own description (solar-system bodies) if present,
@@ -1486,7 +1485,7 @@ if (typeof module !== "undefined") {
     effectiveTime,
     findObjectAt,
     setTheme, kindStyle, mixHex,
-    drawPlanetBody, planetRadius, localBodyObjects, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
+    drawPlanetBody, planetRadius, bodyDiscR, syncLocalBodies, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,

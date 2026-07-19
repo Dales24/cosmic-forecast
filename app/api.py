@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
-from math import cos, log, pi, sin
+from math import atan2, cos, log10, pi, sin, sqrt
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
@@ -42,10 +42,30 @@ def _get_cnn():
     return _cnn_model
 
 
+# ── Unified scene scale ───────────────────────────────────────────────────────
+# Everything shares one map: Earth at the centre (radius 0), the deep sky at the
+# rim. Because a LEO satellite and a galaxy can't share a *linear* distance
+# scale, the radius grows with the log of geocentric distance, so LEO, GEO, the
+# Moon, the planets, and the deep sky fall into successive bands. Direction
+# (angle) is always the object's real geocentric right ascension.
+_R_INNER = 0.10
+_R_OUTER = 0.90
+_LOG_D_MIN = log10(6.6e3)  # ~Earth's surface / lowest LEO, km
+_LOG_D_MAX = log10(4.6e9)  # ~Neptune at its farthest, km
+_DEEP_SKY_RADIUS = 0.95  # galaxies etc.: direction is real, distance is "far"
+_AU_KM = 149_597_870.7
+
+
+def _scene_radius(distance_km: float) -> float:
+    """Map a real geocentric distance (km) onto the map's radial scale (log)."""
+    if distance_km <= 0:
+        return _R_INNER
+    frac = (log10(distance_km) - _LOG_D_MIN) / (_LOG_D_MAX - _LOG_D_MIN)
+    frac = max(0.0, min(1.0, frac))
+    return _R_INNER + frac * (_R_OUTER - _R_INNER)
+
+
 # ── TLE position propagation ──────────────────────────────────────────────────
-_NORM_KM = 42164.0  # GEO distance — normalises LEO at ~0.16, GPS at ~0.63
-
-
 def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[dict]:
     try:
         from sgp4.api import Satrec, jday as sgp4_jday
@@ -72,20 +92,9 @@ def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[
                     dt.minute,
                     dt.second + dt.microsecond / 1e6,
                 )
-                e, r, v = sat.sgp4(jd, fr)
-                if e == 0 and r:
-                    results.append(
-                        {
-                            "id": l1[2:7].strip(),
-                            "name": name,
-                            "kind": kind,
-                            "x_norm": r[0] / _NORM_KM,
-                            "y_norm": r[1] / _NORM_KM,
-                            "vx_norm": v[0] / _NORM_KM,
-                            "vy_norm": v[1] / _NORM_KM,
-                            "source": "celestrak",
-                        }
-                    )
+                err, r, v = sat.sgp4(jd, fr)
+                if err == 0 and r:
+                    results.append(_tle_scene_object(l1[2:7].strip(), name, kind, r, v))
             except Exception:
                 pass
             i += 3
@@ -94,9 +103,36 @@ def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[
     return results
 
 
-# ── Catalog objects (JPL / SIMBAD) ────────────────────────────────────────────
-# These sources don't share the TLE orbital frame, so scene positions are
-# symbolic, not astrometric (see docs/known-issues.md).
+def _tle_scene_object(obj_id: str, name: str, kind: str, r, v) -> dict:
+    """Place a propagated satellite by real direction + log-scaled distance.
+
+    Angle is the object's real position angle in the equatorial (ECI) plane;
+    radius comes from its true geocentric distance. Velocity is expressed as the
+    orbit's real angular rate so the animation sweeps it around at the right pace.
+    """
+    x, y, z = r[0], r[1], r[2]
+    distance_km = sqrt(x * x + y * y + z * z)
+    angle = atan2(y, x)
+    radius = _scene_radius(distance_km)
+    r2 = x * x + y * y
+    omega = (x * v[1] - y * v[0]) / r2 if r2 else 0.0  # real angular rate, rad/s
+    return {
+        "id": obj_id,
+        "name": name,
+        "kind": kind,
+        "x_norm": radius * cos(angle),
+        "y_norm": radius * sin(angle),
+        "vx_norm": -radius * omega * sin(angle),
+        "vy_norm": radius * omega * cos(angle),
+        "speed_kms": sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2),
+        "source": "celestrak",
+    }
+
+
+# ── Near-Earth objects (JPL) ──────────────────────────────────────────────────
+# The CAD API gives a real approach distance and speed but no on-sky position,
+# so the radius is real (from the distance) while the angle is a deterministic
+# placeholder — the one direction we can't source (see docs/known-issues.md).
 def _stable_angle(seed: str) -> float:
     """Deterministic angle in radians from a string (Python's hash() is salted)."""
     return (sum(ord(char) for char in seed) % 360) * pi / 180.0
@@ -105,9 +141,8 @@ def _stable_angle(seed: str) -> float:
 def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
     """Near-Earth approaches (JPL CAD) as scene objects for the user's date.
 
-    CAD gives approach distance/velocity but no on-sky position, so each object
-    is placed symbolically: distance sets an outer-ring radius, a stable hash of
-    the designation sets the angle.
+    The approach *distance* is real and sets the object's radius on the shared
+    scale; the direction is a deterministic placeholder (CAD gives no position).
     """
     from app.data_parser import fetch_jpl
 
@@ -123,8 +158,12 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
             dist_au = float(record.get("dist", 0.0))
         except (TypeError, ValueError):
             dist_au = 0.0
+        try:
+            speed_kms = float(record.get("v_rel", 0.0))
+        except (TypeError, ValueError):
+            speed_kms = 0.0
         angle = _stable_angle(designation)
-        radius = 0.6 + min(dist_au / 0.2, 1.0) * 0.35  # 0.2 AU = CAD dist-max
+        radius = _scene_radius(dist_au * _AU_KM)
         objects.append(
             {
                 "id": f"NEO-{designation}",
@@ -134,6 +173,7 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
                 "y_norm": radius * sin(angle),
                 "vx_norm": 0.0,
                 "vy_norm": 0.0,
+                "speed_kms": speed_kms,
                 "source": "jpl",
             }
         )
@@ -175,10 +215,11 @@ def _celestrak_scene_objects(
 
 
 def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
-    """SIMBAD deep-space objects placed by sky coordinates (RA/Dec).
+    """SIMBAD deep-space objects placed by real sky direction.
 
-    RA (0–360°) maps to x and Dec (−90–90°) to y. These objects are fixed over
-    the simulation's timescale, so velocity is zero.
+    Right ascension gives the real angle on the map; the (astronomically vast)
+    distance puts them all on the outer sky band, spread slightly by declination.
+    They are fixed over the simulation's timescale, so velocity is zero.
     """
     from app.data_parser import fetch_simbad
 
@@ -195,116 +236,160 @@ def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
         except (TypeError, ValueError):
             continue
         name = str(record.get("main_id", slug))
+        angle = ra * pi / 180.0  # real right ascension
+        radius = _DEEP_SKY_RADIUS - (abs(dec) / 90.0) * 0.06  # spread by declination
         objects.append(
             {
                 "id": f"{kind}-{name}",
                 "name": name,
                 "kind": kind,
-                "x_norm": (ra / 180.0 - 1.0) * 0.9,
-                "y_norm": (dec / 90.0) * 0.9,
+                "x_norm": radius * cos(angle),
+                "y_norm": radius * sin(angle),
                 "vx_norm": 0.0,
                 "vy_norm": 0.0,
+                "speed_kms": 0.0,
                 "source": "simbad",
             }
         )
     return objects
 
 
-# ── Solar-system planets ──────────────────────────────────────────────────────
-# Real orbital data for the planets (Earth is omitted — it's the scene centre).
-# `a_au` (semi-major axis) sets the ring radius, `period_days` drives the angle
-# over the scene's date, `v_kms` is the mean orbital velocity shown in the panel.
-# Positions are representative (one ring per orbit), matching how JPL/SIMBAD
-# objects are placed.
-# Each row: (name, a_au, period_days, v_kms, description).
+# ── Solar-system bodies (real ephemeris) ──────────────────────────────────────
+# Real geocentric positions come from app.ephemeris: right ascension gives the
+# real angle on the map, distance sets the radius on the shared scale. `speed_kms`
+# is the mean orbital speed shown in the panel.
+# Each row: (name, speed_kms, description).
 _PLANETS = [
     (
         "Mercury",
-        0.387,
-        88.0,
         47.4,
         "Smallest planet and closest to the Sun; a cratered, airless world of extreme temperature swings.",
-    ),
+    ),  # noqa: E501
     (
         "Venus",
-        0.723,
-        224.7,
         35.0,
-        "Second planet; a runaway greenhouse under thick clouds of sulfuric acid, hottest surface in the solar system.",
-    ),
+        "A runaway greenhouse under thick clouds of sulfuric acid — the hottest surface in the solar system.",
+    ),  # noqa: E501
     (
         "Mars",
-        1.524,
-        687.0,
         24.1,
         "The red planet; a cold desert world with the tallest volcano and deepest canyon in the solar system.",
-    ),
+    ),  # noqa: E501
     (
         "Jupiter",
-        5.203,
-        4331.0,
         13.1,
         "Largest planet; a gas giant with a centuries-old storm, the Great Red Spot, and dozens of moons.",
-    ),
+    ),  # noqa: E501
     (
         "Saturn",
-        9.537,
-        10747.0,
         9.7,
-        "Sixth planet; a gas giant famed for its brilliant, wide ring system of ice and rock.",
-    ),
+        "A gas giant famed for its brilliant, wide ring system of ice and rock.",
+    ),  # noqa: E501
     (
         "Uranus",
-        19.19,
-        30589.0,
         6.8,
-        "Seventh planet; an ice giant tipped on its side, orbiting the Sun at a near-right angle.",
-    ),
+        "An ice giant tipped on its side, orbiting the Sun at a near-right angle.",
+    ),  # noqa: E501
     (
         "Neptune",
-        30.07,
-        59800.0,
         5.4,
-        "Farthest planet; a deep-blue ice giant with the fastest winds in the solar system.",
-    ),
+        "The farthest planet; a deep-blue ice giant with the fastest winds in the solar system.",
+    ),  # noqa: E501
 ]
 
-# Log-radius mapping so all orbits (0.39 AU .. 30 AU) fit the visible ring band.
-_PLANET_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
-_PLANET_RING_MIN, _PLANET_RING_MAX = 0.30, 0.94
-_PLANET_AU_MIN, _PLANET_AU_MAX = 0.387, 30.07
 
-
-def _planet_ring_radius(a_au: float) -> float:
-    """Map a planet's orbital distance (AU) onto the scene's ring band (log scale)."""
-    span = log(_PLANET_AU_MAX) - log(_PLANET_AU_MIN)
-    frac = (log(a_au) - log(_PLANET_AU_MIN)) / span
-    return _PLANET_RING_MIN + frac * (_PLANET_RING_MAX - _PLANET_RING_MIN)
+def _radec_scene_xy(ra_rad: float, distance_km: float) -> tuple[float, float]:
+    """Scene x/y for a body at a real right ascension and geocentric distance."""
+    radius = _scene_radius(distance_km)
+    return radius * cos(ra_rad), radius * sin(ra_rad)
 
 
 def _planet_scene_objects(dt: datetime) -> list[dict]:
-    """The planets, placed on their orbital rings at an angle set by `dt`."""
-    days = (dt - _PLANET_EPOCH).total_seconds() / 86400.0
+    """The planets at their real geocentric positions for `dt`."""
+    from app import ephemeris
+
     objects: list[dict] = []
-    for index, (name, a_au, period_days, v_kms, description) in enumerate(_PLANETS):
-        # Spread starting longitudes so planets don't line up on a single spoke.
-        angle = index * (2 * pi / len(_PLANETS)) + 2 * pi * (days / period_days)
-        radius = _planet_ring_radius(a_au)
-        v_norm = v_kms / _NORM_KM  # panel converts back to km/s
+    for name, speed_kms, description in _PLANETS:
+        ra, dist_km = ephemeris.planet_geocentric(name.lower(), dt)
+        x_norm, y_norm = _radec_scene_xy(ra, dist_km)
         objects.append(
             {
                 "id": f"planet-{name}",
                 "name": name,
                 "kind": "planet",
-                "x_norm": radius * cos(angle),
-                "y_norm": radius * sin(angle),
-                "vx_norm": -v_norm * sin(angle),  # tangential to the orbit
-                "vy_norm": v_norm * cos(angle),
-                "source": "solar_system",
+                "x_norm": x_norm,
+                "y_norm": y_norm,
+                "vx_norm": 0.0,
+                "vy_norm": 0.0,
+                "speed_kms": speed_kms,
+                "source": "ephemeris",
                 "description": description,
             }
         )
     return objects
+
+
+def _sun_scene_object(dt: datetime) -> dict:
+    """The Sun at its real geocentric position for `dt`."""
+    from app import ephemeris
+
+    x_norm, y_norm = _radec_scene_xy(*ephemeris.sun_geocentric(dt))
+    return {
+        "id": "body-Sun",
+        "name": "Sun",
+        "kind": "sun",
+        "x_norm": x_norm,
+        "y_norm": y_norm,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 0.0,
+        "source": "ephemeris",
+        "description": (
+            "The star at the heart of the solar system; its fusion powers the "
+            "light and warmth that make Earth habitable."
+        ),
+    }
+
+
+def _moon_scene_object(dt: datetime) -> dict:
+    """The Moon at its real geocentric position for `dt`."""
+    from app import ephemeris
+
+    x_norm, y_norm = _radec_scene_xy(*ephemeris.moon_geocentric(dt))
+    return {
+        "id": "body-Moon",
+        "name": "Moon",
+        "kind": "moon",
+        "x_norm": x_norm,
+        "y_norm": y_norm,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 1.022,
+        "source": "ephemeris",
+        "description": (
+            "Earth's only natural satellite; its gravity drives the ocean tides "
+            "and it always shows us the same face."
+        ),
+    }
+
+
+def _earth_scene_object() -> dict:
+    """Earth, the observer, fixed at the centre of the map."""
+    return {
+        "id": "body-Earth",
+        "name": "Earth",
+        "kind": "earth",
+        "x_norm": 0.0,
+        "y_norm": 0.0,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 0.0,
+        "source": "ephemeris",
+        "description": (
+            "Our home planet and the observer's vantage point — the map is drawn "
+            "as the sky seen from here."
+        ),
+    }
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -370,7 +455,10 @@ def get_scene(datetime_str: str | None = None, limit: int = 40):
         for result in pool.map(lambda fetch: fetch(), tasks):
             objects.extend(result)
 
-    # Solar-system planets — local, no network, so added directly.
+    # Solar-system bodies at their real positions — local, no network.
+    objects.append(_earth_scene_object())
+    objects.append(_sun_scene_object(dt))
+    objects.append(_moon_scene_object(dt))
     objects.extend(_planet_scene_objects(dt))
 
     # Unidentified — position intentionally unknown
@@ -383,6 +471,7 @@ def get_scene(datetime_str: str | None = None, limit: int = 40):
             "y_norm": -0.20,
             "vx_norm": 0.0,
             "vy_norm": 0.0,
+            "speed_kms": 0.0,
             "source": "unknown",
         }
     )

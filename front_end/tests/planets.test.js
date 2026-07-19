@@ -88,29 +88,23 @@ describe('planet hit-testing', () => {
 });
 
 describe('local bodies (Sun / Earth / Moon)', () => {
-  test('returns Sun, Earth, and Moon with the full clickable schema', () => {
-    const bodies = app.localBodyObjects();
-    expect(bodies.map((b) => b.name)).toEqual(['Sun', 'Earth', 'Moon']);
-    for (const b of bodies) {
-      for (const field of [
-        'id', 'name', 'kind', 'x_norm', 'y_norm',
-        'vx_norm', 'vy_norm', 'source', 'disc_r', 'description',
-      ]) {
-        expect(b[field]).toBeDefined();
-      }
-      expect(b.description).toBeTruthy();
-      expect(b.disc_r).toBeGreaterThan(0);
-      // Zero velocity pins them under their drawn positions during Play.
-      expect(b.vx_norm).toBe(0);
-      expect(b.vy_norm).toBe(0);
-    }
+  test('bodyDiscR gives disc radii for drawn bodies, 0 for glyph kinds', () => {
+    expect(app.bodyDiscR({ kind: 'sun' })).toBe(app.SUN.r);
+    expect(app.bodyDiscR({ kind: 'moon' })).toBe(app.MOON.r);
+    expect(app.bodyDiscR({ kind: 'earth' })).toBeGreaterThan(0);
+    expect(app.bodyDiscR({ kind: 'planet', name: 'Jupiter' }))
+      .toBe(app.PLANET_STYLES.Jupiter.r);
+    expect(app.bodyDiscR({ kind: 'satellite' })).toBe(0);
   });
 
-  test('positions line up with where each body is drawn', () => {
-    const byName = Object.fromEntries(app.localBodyObjects().map((b) => [b.name, b]));
-    expect([byName.Sun.x_norm, byName.Sun.y_norm]).toEqual([app.SUN.x, app.SUN.y]);
-    expect([byName.Earth.x_norm, byName.Earth.y_norm]).toEqual([0, 0]);
-    expect([byName.Moon.x_norm, byName.Moon.y_norm]).toEqual([app.MOON.x, app.MOON.y]);
+  test('syncLocalBodies points the Sun/Moon artwork at their scene positions', () => {
+    app.sceneObjects = [
+      { kind: 'sun', name: 'Sun', x_norm: 0.5, y_norm: -0.3 },
+      { kind: 'moon', name: 'Moon', x_norm: 0.2, y_norm: 0.1 },
+    ];
+    app.syncLocalBodies();
+    expect([app.SUN.x, app.SUN.y]).toEqual([0.5, -0.3]);
+    expect([app.MOON.x, app.MOON.y]).toEqual([0.2, 0.1]);
   });
 
   test('every local-body kind has a style and a display name', () => {
@@ -120,8 +114,8 @@ describe('local bodies (Sun / Earth / Moon)', () => {
     }
   });
 
-  test('Earth is clickable across its disc, not just the centre', () => {
-    app.sceneObjects = [{ name: 'Earth', kind: 'earth', x_norm: 0, y_norm: 0, disc_r: 0.045 }];
+  test('a body is clickable across its disc, not just the centre', () => {
+    app.sceneObjects = [{ name: 'Earth', kind: 'earth', x_norm: 0, y_norm: 0 }];
     app.objPositions = [{ x: 100, y: 100, hit: 30 }];
     expect(app.findObjectAt(120, 100)).toBe(0);   // 20px in — inside the disc
     expect(app.findObjectAt(200, 100)).toBe(-1);  // far away — miss
@@ -131,11 +125,12 @@ describe('local bodies (Sun / Earth / Moon)', () => {
 describe('drawSun()', () => {
   const ctx = document.getElementById('space-map').getContext('2d');
 
-  test('the Sun is upper-left, matching the scene light direction', () => {
-    // Every body is lit from the upper-left, so the Sun must live there too.
-    expect(app.SUN.x).toBeLessThan(0);
-    expect(app.SUN.y).toBeLessThan(0);
+  test('the Sun has a draw radius and numeric position', () => {
+    // The Sun now sits at its real position (synced from the scene), not a
+    // fixed spot, so only its draw radius is invariant.
     expect(app.SUN.r).toBeGreaterThan(0);
+    expect(Number.isFinite(app.SUN.x)).toBe(true);
+    expect(Number.isFinite(app.SUN.y)).toBe(true);
   });
 
   test('renders a corona and a disc without throwing', () => {
@@ -148,9 +143,12 @@ describe('drawSun()', () => {
 describe('drawMoon()', () => {
   const ctx = document.getElementById('space-map').getContext('2d');
 
-  test('the Moon sits close beside Earth at the origin', () => {
-    expect(Math.hypot(app.MOON.x, app.MOON.y)).toBeLessThan(0.2);
+  test('the Moon has a draw radius and numeric position', () => {
+    // The Moon is synced to its real scene position, so only its draw radius
+    // is invariant.
     expect(app.MOON.r).toBeGreaterThan(0);
+    expect(Number.isFinite(app.MOON.x)).toBe(true);
+    expect(Number.isFinite(app.MOON.y)).toBe(true);
   });
 
   test('renders the disc plus craters without throwing', () => {

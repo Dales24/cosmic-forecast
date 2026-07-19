@@ -22,19 +22,29 @@ caveats behind the scene visualization. Grouped by area.
 
 ## Scene positions (x/y coordinates)
 
-The scene mixes objects whose positions come from very different places. They
-are **not** on one common physical scale.
+Everything now shares **one map** centred on Earth: the **angle** is each
+object's real geocentric right ascension, and the **radius** grows with the
+*log* of its real geocentric distance (a LEO satellite and a galaxy can't share
+a linear distance scale, so distance is honestly compressed). The bands run
+Earth → LEO → GEO → Moon → planets → deep sky (`_scene_radius` in `api.py`).
 
-- **Satellites / ISS:** real positions from sgp4 propagation of current TLEs,
-  normalized by GEO distance (42,164 km). Data-driven and time-aware.
-- **SIMBAD deep-space (galaxies, nebulae):** real sky coordinates — RA (0–360°)
-  maps to x, Dec (−90–90°) to y. A flat 2D projection, not the orbital frame.
-- **JPL near-Earth objects:** **symbolic placement.** The CAD API returns
-  approach *distance* and *velocity* but no on-sky position, so distance sets an
-  outer-ring radius and a stable hash of the designation sets the angle. The
-  distance is real; the on-screen direction is fabricated.
+- **Satellites / ISS / debris / rocket bodies:** real sgp4 positions — angle
+  from the ECI direction, radius from true geocentric distance, and a real
+  orbital angular rate driving the animation. Time-aware.
+- **Sun, Moon, planets:** real geocentric positions from `app.ephemeris` (JPL
+  Keplerian elements + an abbreviated lunar series), accurate to ~arc-minutes.
+- **SIMBAD deep-space:** real right ascension sets the angle; distance is
+  effectively infinite, so they sit on the outer sky band (spread by declination).
+- **JPL near-Earth objects:** the approach *distance* is real (sets the radius),
+  but the CAD API gives no on-sky position, so the **direction is still a
+  deterministic placeholder** — the one thing we can't source without ephemeris
+  for each body.
 - **UFO:** hardcoded at `(0.28, -0.20)` by design — "position intentionally
   unknown."
+
+Lighting note: the Moon's phase follows the real Sun direction, but Earth's and
+the planets' shading stay stylised (fixed upper-left), so shadows may not line
+up with the Sun's real on-screen position.
 
 ## Date / time handling
 
