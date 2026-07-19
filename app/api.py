@@ -4,10 +4,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
-from math import cos, pi, sin
+from math import cos, log, pi, sin
 
 import numpy as np
-import requests as _requests
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,7 +39,6 @@ def _get_cnn():
 
 # ── TLE position propagation ──────────────────────────────────────────────────
 _NORM_KM = 42164.0  # GEO distance — normalises LEO at ~0.16, GPS at ~0.63
-_CELESTRAK_GP = "https://celestrak.org/NORAD/elements/gp.php"
 
 
 def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[dict]:
@@ -139,26 +137,36 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
 
 # Deep-space catalogs pulled into every scene (SIMBAD): (slug, kind, limit).
 _DEEP_SPACE_SOURCES = [
-    ("galaxy", "galaxy", 4),
-    ("nebula", "nebula", 3),
-    ("star", "star", 3),
+    ("galaxy", "galaxy", 6),
+    ("nebula", "nebula", 4),
+    ("star", "star", 6),
     ("black_hole", "black_hole", 2),
-    ("quasar", "quasar", 2),
+    ("quasar", "quasar", 3),
     ("pulsar", "pulsar", 2),
     ("supernova_remnant", "supernova_remnant", 2),
 ]
 
+# Orbital (TLE) catalogs pulled into every scene from CelesTrak: (slug, kind, limit).
+# Satellites use the caller's `limit`; the rest are fixed supporting counts.
+_TLE_SCENE_SOURCES = [
+    ("space_debris", "space_debris", 10),
+    ("rocket_body", "rocket_body", 10),
+]
 
-def _active_satellites(dt: datetime, limit: int) -> list[dict]:
-    """Active satellites from CelesTrak, propagated to `dt`."""
+
+def _celestrak_scene_objects(
+    slug: str, kind: str, dt: datetime, limit: int
+) -> list[dict]:
+    """Fetch a CelesTrak group's TLEs (disk-cached) and propagate them to `dt`."""
     if limit <= 0:
         return []
+    from app.data_parser import fetch_celestrak_text
+
     try:
-        resp = _requests.get(f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle", timeout=8)
-        resp.raise_for_status()
-        return _propagate_tles(resp.text, dt, limit=limit, kind="satellite")
+        tle_text = fetch_celestrak_text(slug)
     except Exception:
         return []
+    return _propagate_tles(tle_text, dt, limit=limit, kind=kind)
 
 
 def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
@@ -197,6 +205,103 @@ def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
     return objects
 
 
+# ── Solar-system planets ──────────────────────────────────────────────────────
+# Real orbital data for the planets (Earth is omitted — it's the scene centre).
+# `a_au` (semi-major axis) sets the ring radius, `period_days` drives the angle
+# over the scene's date, `v_kms` is the mean orbital velocity shown in the panel.
+# Positions are representative (one ring per orbit), matching how JPL/SIMBAD
+# objects are placed.
+# Each row: (name, a_au, period_days, v_kms, description).
+_PLANETS = [
+    (
+        "Mercury",
+        0.387,
+        88.0,
+        47.4,
+        "Smallest planet and closest to the Sun; a cratered, airless world of extreme temperature swings.",
+    ),
+    (
+        "Venus",
+        0.723,
+        224.7,
+        35.0,
+        "Second planet; a runaway greenhouse under thick clouds of sulfuric acid, hottest surface in the solar system.",
+    ),
+    (
+        "Mars",
+        1.524,
+        687.0,
+        24.1,
+        "The red planet; a cold desert world with the tallest volcano and deepest canyon in the solar system.",
+    ),
+    (
+        "Jupiter",
+        5.203,
+        4331.0,
+        13.1,
+        "Largest planet; a gas giant with a centuries-old storm, the Great Red Spot, and dozens of moons.",
+    ),
+    (
+        "Saturn",
+        9.537,
+        10747.0,
+        9.7,
+        "Sixth planet; a gas giant famed for its brilliant, wide ring system of ice and rock.",
+    ),
+    (
+        "Uranus",
+        19.19,
+        30589.0,
+        6.8,
+        "Seventh planet; an ice giant tipped on its side, orbiting the Sun at a near-right angle.",
+    ),
+    (
+        "Neptune",
+        30.07,
+        59800.0,
+        5.4,
+        "Farthest planet; a deep-blue ice giant with the fastest winds in the solar system.",
+    ),
+]
+
+# Log-radius mapping so all orbits (0.39 AU .. 30 AU) fit the visible ring band.
+_PLANET_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
+_PLANET_RING_MIN, _PLANET_RING_MAX = 0.30, 0.94
+_PLANET_AU_MIN, _PLANET_AU_MAX = 0.387, 30.07
+
+
+def _planet_ring_radius(a_au: float) -> float:
+    """Map a planet's orbital distance (AU) onto the scene's ring band (log scale)."""
+    span = log(_PLANET_AU_MAX) - log(_PLANET_AU_MIN)
+    frac = (log(a_au) - log(_PLANET_AU_MIN)) / span
+    return _PLANET_RING_MIN + frac * (_PLANET_RING_MAX - _PLANET_RING_MIN)
+
+
+def _planet_scene_objects(dt: datetime) -> list[dict]:
+    """The planets, placed on their orbital rings at an angle set by `dt`."""
+    days = (dt - _PLANET_EPOCH).total_seconds() / 86400.0
+    objects: list[dict] = []
+    for index, (name, a_au, period_days, v_kms, description) in enumerate(_PLANETS):
+        # Spread starting longitudes so planets don't line up on a single spoke.
+        angle = index * (2 * pi / len(_PLANETS)) + 2 * pi * (days / period_days)
+        radius = _planet_ring_radius(a_au)
+        v_norm = v_kms / _NORM_KM  # panel converts back to km/s
+        objects.append(
+            {
+                "id": f"planet-{name}",
+                "name": name,
+                "kind": "planet",
+                "x_norm": radius * cos(angle),
+                "y_norm": radius * sin(angle),
+                "vx_norm": -v_norm * sin(angle),  # tangential to the orbit
+                "vy_norm": v_norm * cos(angle),
+                "source": "solar_system",
+                "description": description,
+            }
+        )
+    return objects
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 class ForecastObject(BaseModel):
     id: int
@@ -219,7 +324,7 @@ def _clear_scene_cache() -> None:
 
 
 @app.get("/api/scene")
-def get_scene(datetime_str: str | None = None, limit: int = 15):
+def get_scene(datetime_str: str | None = None, limit: int = 40):
     cache_key = (datetime_str, limit)
     cached = _scene_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _SCENE_TTL_SECONDS:
@@ -238,23 +343,19 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
 
     objects: list[dict] = []
 
-    # Space stations (ISS etc.). CelesTrak's legacy /pub/TLE/*.txt files now 403;
-    # the GP query API is the supported source.
-    stations_url = f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle"
-    try:
-        resp = _requests.get(stations_url, timeout=8)
-        resp.raise_for_status()
-        objects.extend(_propagate_tles(resp.text, dt, limit=3, kind="iss"))
-    except Exception:
-        pass
-
-    # The remaining sources are independent, so fetch them concurrently — scene
-    # latency becomes the slowest single source, not the sum of all of them
-    # (active sats + JPL near-Earth + one SIMBAD query per deep-space type).
-    remaining = max(0, limit - len(objects))
+    # All sources are independent, so fetch them concurrently — scene latency
+    # becomes the slowest single source, not the sum of all of them. Orbital
+    # (CelesTrak TLE) legs: stations + satellites + debris + rocket bodies;
+    # plus JPL near-Earth and one SIMBAD query per deep-space type.
+    date_str = dt.strftime("%Y-%m-%d")
     tasks = [
-        partial(_active_satellites, dt, remaining),
-        partial(_jpl_scene_objects, dt.strftime("%Y-%m-%d"), 5),
+        partial(_celestrak_scene_objects, "iss", "iss", dt, 3),
+        partial(_celestrak_scene_objects, "satellite", "satellite", dt, limit),
+        partial(_jpl_scene_objects, date_str, 10),
+    ]
+    tasks += [
+        partial(_celestrak_scene_objects, slug, kind, dt, lim)
+        for slug, kind, lim in _TLE_SCENE_SOURCES
     ]
     tasks += [
         partial(_simbad_scene_objects, slug, kind, lim)
@@ -263,6 +364,9 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
         for result in pool.map(lambda fetch: fetch(), tasks):
             objects.extend(result)
+
+    # Solar-system planets — local, no network, so added directly.
+    objects.extend(_planet_scene_objects(dt))
 
     # Unidentified — position intentionally unknown
     objects.append(
@@ -287,10 +391,17 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
 def get_objects(object_slug: str, date: str | None = None, limit: int = 20):
     from app.data_parser import get_data
 
-    return {
-        "slug": object_slug,
-        "results": get_data(object_slug, date=date, limit=limit),
-    }
+    try:
+        results = get_data(object_slug, date=date, limit=limit)
+    except ValueError as exc:
+        # Unknown slug — a client error, not an upstream failure.
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception:
+        # A single external source (CelesTrak/JPL/SIMBAD) failing must not 500
+        # the endpoint; degrade to an empty result the UI can handle.
+        return {"slug": object_slug, "results": [], "error": "source_unavailable"}
+
+    return {"slug": object_slug, "results": results}
 
 
 @app.get("/api/classify/{obj_id}")

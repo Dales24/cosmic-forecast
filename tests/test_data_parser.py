@@ -7,6 +7,7 @@ import pytest
 from app.data_parser import (
     _parse_tle_text,
     fetch_celestrak,
+    fetch_celestrak_text,
     fetch_jpl,
     fetch_simbad,
     get_data,
@@ -99,6 +100,44 @@ def test_fetch_celestrak_unknown_slug_raises():
         fetch_celestrak("nonexistent_slug")
 
 
+def test_fetch_celestrak_text_caches_and_falls_back(tmp_path):
+    # A successful download populates the on-disk cache...
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
+        assert fetch_celestrak_text("satellite") == _ISS_TLE
+
+    # ...so when CelesTrak later 403s (unchanged group), the cache is served.
+    failing = MagicMock()
+    failing.raise_for_status.side_effect = Exception("403 not updated")
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=failing),
+    ):
+        assert fetch_celestrak_text("satellite") == _ISS_TLE
+
+
+def test_fetch_celestrak_text_raises_when_no_cache(tmp_path):
+    failing = MagicMock()
+    failing.raise_for_status.side_effect = Exception("boom")
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=failing),
+    ):
+        with pytest.raises(Exception):
+            fetch_celestrak_text("satellite")
+
+
+def test_fetch_celestrak_rocket_body_queries_by_name():
+    # CelesTrak has no rocket-body GROUP; it must query by the "R/B" name suffix.
+    with patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock:
+        fetch_celestrak("rocket_body", limit=1)
+    url = mock.call_args[0][0]
+    assert "NAME=R/B" in url
+    assert "rocket-bodies" not in url
+
+
 def test_fetch_celestrak_respects_limit():
     with patch(
         "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE * 10)
@@ -178,6 +217,16 @@ def test_fetch_simbad_includes_adql_query():
     params = mock.call_args[1]["params"]
     assert "ADQL" in params["LANG"]
     assert "G" in params["QUERY"]
+
+
+def test_fetch_simbad_uses_equality_not_like():
+    # SIMBAD's otype column rejects LIKE ("LIKE not supported on otype"); the
+    # query must use exact equality. Regression guard for that fix.
+    with patch("app.data_parser.requests.get", return_value=_simbad_response()) as mock:
+        fetch_simbad("galaxy", limit=5)
+    query = mock.call_args[1]["params"]["QUERY"]
+    assert "otype = 'G'" in query
+    assert "LIKE" not in query.upper()
 
 
 def test_fetch_simbad_unknown_slug_raises():

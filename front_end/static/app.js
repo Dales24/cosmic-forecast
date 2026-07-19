@@ -18,6 +18,10 @@ const KIND_STYLES = {
   quasar:            { size: 4,  color: "#22d3ee" },
   pulsar:            { size: 3,  color: "#f472b6" },
   supernova_remnant: { size: 5,  color: "#fb7185" },
+  planet:            { size: 8,  color: "#e8c89a" },
+  sun:               { size: 10, color: "#ffcf5a" },
+  earth:             { size: 9,  color: "#5aa9ff" },
+  moon:              { size: 6,  color: "#cfd2dc" },
   ufo:               { size: 4,  color: "#00ff88" },
 };
 
@@ -40,6 +44,10 @@ const KIND_NAMES = {
   quasar:            "Quasar",
   pulsar:            "Pulsar",
   supernova_remnant: "Supernova Remnant",
+  planet:            "Planet",
+  sun:               "Sun \u{2600}",
+  earth:             "Earth \u{1F30D}",
+  moon:              "Moon \u{1F311}",
   ufo:               "Unidentified \u{1F47D}",
 };
 
@@ -141,7 +149,8 @@ async function loadScene(datetimeISO) {
     const qs   = datetimeISO ? "?datetime_str=" + encodeURIComponent(datetimeISO) : "";
     const resp = await fetch("/api/scene" + qs);
     const data = await resp.json();
-    sceneObjects = data.objects || [];
+    // Append the Sun/Earth/Moon so they're clickable alongside catalog objects.
+    sceneObjects = (data.objects || []).concat(localBodyObjects());
   } catch {
     // keep whatever we had
   }
@@ -413,8 +422,10 @@ function drawVignette() {
   ctx.fillRect(0, 0, w, h);
 }
 
+const EARTH_DISC_R = 0.045; // Earth's disc radius in scene-scale units
+
 function drawEarth(cx, cy, scale) {
-  const r = scale * 0.045;
+  const r = scale * EARTH_DISC_R;
 
   // Outer atmosphere glow.
   const glow = ctx.createRadialGradient(cx, cy, r * .9, cx, cy, r * 2.6);
@@ -482,16 +493,18 @@ function drawEarth(cx, cy, scale) {
 // Distant worlds scattered behind Earth for depth. Purely visual — not scene
 // objects, so they never enter hit-testing, forecasting, or the legend.
 // Positions are normalized scale-units from the scene centre.
-const PLANETS = [
-  { name: "Mercury", x:  .43, y: -.05, r: .013, hi: "#cdc6ba", mid: "#7d7367", lo: "#2e2a24", craters: true },
-  { name: "Venus",   x:  .35, y: -.29, r: .020, hi: "#f6ead0", mid: "#d9b978", lo: "#8a6d3a" },
-  { name: "Mars",    x:  .13, y: -.41, r: .016, hi: "#f0a878", mid: "#c65f38", lo: "#5c2415" },
-  { name: "Jupiter", x: -.40, y:  .23, r: .046, hi: "#f2d9b0", mid: "#c79a63", lo: "#6d4626", bands: true, spot: true },
-  { name: "Saturn",  x:  .33, y:  .34, r: .034, hi: "#efe0b0", mid: "#c9ac6b", lo: "#7a6034", bands: true, ring: "#d8c48f" },
-  { name: "Uranus",  x: -.34, y:  .41, r: .026, hi: "#cdeefb", mid: "#8fd0e6", lo: "#3f8fae", ring: "#a9d9e6" },
-  { name: "Neptune", x: -.45, y: -.02, r: .025, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
-  { name: "Pluto",   x:  .07, y:  .44, r: .010, hi: "#d8cbb8", mid: "#9c8b74", lo: "#4a4136", craters: true },
-];
+// Per-planet appearance, keyed by name. Positions now come from the scene
+// (kind === "planet"); this only carries how each body is drawn. `r` is the
+// disc radius in scene-scale units.
+const PLANET_STYLES = {
+  Mercury: { r: .013, hi: "#cdc6ba", mid: "#7d7367", lo: "#2e2a24", craters: true },
+  Venus:   { r: .020, hi: "#f6ead0", mid: "#d9b978", lo: "#8a6d3a" },
+  Mars:    { r: .016, hi: "#f0a878", mid: "#c65f38", lo: "#5c2415" },
+  Jupiter: { r: .046, hi: "#f2d9b0", mid: "#c79a63", lo: "#6d4626", bands: true, spot: true },
+  Saturn:  { r: .034, hi: "#efe0b0", mid: "#c9ac6b", lo: "#7a6034", bands: true, ring: "#d8c48f" },
+  Uranus:  { r: .026, hi: "#cdeefb", mid: "#8fd0e6", lo: "#3f8fae", ring: "#a9d9e6" },
+  Neptune: { r: .025, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
+};
 
 // A lit sphere: highlight upper-left, shading toward the far edge.
 function _shadedSphere(cx, cy, r, hi, mid, lo) {
@@ -549,24 +562,34 @@ function _planetRing(cx, cy, r, color, front) {
   ctx.restore();
 }
 
-function drawPlanets(cx, cy, scale) {
-  for (const p of PLANETS) {
-    const px = cx + p.x * scale, py = cy + p.y * scale, r = p.r * scale;
+// Draw one planet's disc at a screen position, from its PLANET_STYLES entry.
+// Positions come from the scene object, so planets are hit-testable like any
+// other object and drawn here only for their look.
+function drawPlanetBody(name, px, py, scale) {
+  const p = PLANET_STYLES[name];
+  if (!p) return;
+  const r = p.r * scale;
 
-    if (p.ring) _planetRing(px, py, r, p.ring, false);
-    _shadedSphere(px, py, r, p.hi, p.mid, p.lo);
+  if (p.ring) _planetRing(px, py, r, p.ring, false);
+  _shadedSphere(px, py, r, p.hi, p.mid, p.lo);
 
-    // Belts and shading stay inside the disc.
-    ctx.save();
-    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
-    if (p.bands) _planetBands(px, py, r);
-    if (p.spot) _redSpot(px, py, r);
-    if (p.craters) _craters(px, py, r, "rgba(50,44,38,0.35)");
-    _planetShadow(px, py, r);
-    ctx.restore();
+  // Belts and shading stay inside the disc.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.clip();
+  if (p.bands) _planetBands(px, py, r);
+  if (p.spot) _redSpot(px, py, r);
+  if (p.craters) _craters(px, py, r, "rgba(50,44,38,0.35)");
+  _planetShadow(px, py, r);
+  ctx.restore();
 
-    if (p.ring) _planetRing(px, py, r, p.ring, true);
-  }
+  if (p.ring) _planetRing(px, py, r, p.ring, true);
+}
+
+// A planet's disc radius in scene-scale units (0 if unknown), for hit-testing
+// and selection halos.
+function planetRadius(name) {
+  const p = PLANET_STYLES[name];
+  return p ? p.r : 0;
 }
 
 // The Sun sits upper-left — the same direction every body is lit from, so the
@@ -621,6 +644,27 @@ function drawMoon(cx, cy, scale) {
   ctx.fillStyle = shade;
   ctx.fillRect(x - r, y - r, r * 2, r * 2);
   ctx.restore();
+}
+
+// The Sun, Earth, and Moon are drawn separately (they anchor the scene's
+// composition and lighting), but they should be clickable like everything else.
+// These objects carry the standard scene schema plus a `disc_r` (scale-units
+// radius) and a description, placed to line up with where each body is drawn.
+// Velocity is zero so they stay pinned to their drawn positions during Play.
+function localBodyObjects() {
+  const body = (name, kind, x, y, disc_r, description) => ({
+    id: "body-" + name, name, kind,
+    x_norm: x, y_norm: y, vx_norm: 0, vy_norm: 0,
+    source: "solar_system", disc_r, description,
+  });
+  return [
+    body("Sun", "sun", SUN.x, SUN.y, SUN.r,
+      "The star at the heart of the solar system; its fusion powers the light and warmth that make Earth habitable."),
+    body("Earth", "earth", 0, 0, EARTH_DISC_R,
+      "Our home planet — the only known world with liquid-water oceans and life, and the vantage point for this map."),
+    body("Moon", "moon", MOON.x, MOON.y, MOON.r,
+      "Earth's only natural satellite; its gravity drives the ocean tides and it always shows us the same face."),
+  ];
 }
 
 function drawOrbitalPaths(cx, cy, scale) {
@@ -832,7 +876,15 @@ function drawSceneObjects(cx, cy, scale, realTime) {
 
     const wx = cx + (obj.x_norm + (obj.vx_norm || 0) * simElapsedS) * scale;
     const wy = cy + (obj.y_norm + (obj.vy_norm || 0) * simElapsedS) * scale;
-    objPositions[i] = { x: wx, y: wy };
+
+    // Planets and the Sun/Earth/Moon are drawn as sized discs, so their
+    // clickable/halo radius is the disc itself; small glyphs use their size.
+    const isPlanet = obj.kind === "planet";
+    const isLocalBody = obj.disc_r !== undefined; // Sun/Earth/Moon
+    const vr = isPlanet ? planetRadius(obj.name) * scale
+             : isLocalBody ? obj.disc_r * scale
+             : style.size;
+    objPositions[i] = { x: wx, y: wy, hit: (isPlanet || isLocalBody) ? vr : 0 };
 
     // Motion trail for objects that actually move, only while the sim runs.
     if (moving && (obj.vx_norm || obj.vy_norm)) {
@@ -845,16 +897,21 @@ function drawSceneObjects(cx, cy, scale, realTime) {
 
     if (i === selectedIdx) {
       ctx.strokeStyle = style.color; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.75;
-      ctx.beginPath(); ctx.arc(wx, wy, style.size + 7, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(wx, wy, vr + 7, 0, Math.PI*2); ctx.stroke();
       ctx.globalAlpha = 1;
     }
     if (i === hoveredIdx && i !== selectedIdx) {
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.globalAlpha = 0.35;
-      ctx.beginPath(); ctx.arc(wx, wy, style.size + 6, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(wx, wy, vr + 6, 0, Math.PI*2); ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
-    drawGlyph(obj.kind, wx, wy, style, phase, sunX, sunY);
+    if (isPlanet) {
+      drawPlanetBody(obj.name, wx, wy, scale);
+    } else if (!isLocalBody) {
+      // Sun/Earth/Moon are already painted by their own draw functions.
+      drawGlyph(obj.kind, wx, wy, style, phase, sunX, sunY);
+    }
   }
 }
 
@@ -873,7 +930,6 @@ function frame(realTime) {
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
   drawSun(CX, CY, SCALE);
-  drawPlanets(CX, CY, SCALE);
   drawOrbitalPaths(CX, CY, SCALE);
   drawEarth(CX, CY, SCALE);
   drawMoon(CX, CY, SCALE);
@@ -921,13 +977,15 @@ function findObjectAt(sx, sy) {
   const wx   = (sx - panX) / zoom;
   const wy   = (sy - panY) / zoom;
   const hitR = HIT_RADIUS / zoom;
-  let closest = -1, minD = hitR;
+  let closest = -1, minD = Infinity;
   for (let i = 0; i < sceneObjects.length; i++) {
     if (filterKind && sceneObjects[i].kind !== filterKind) continue;
     const p = objPositions[i];
     if (!p) continue;
     const d = Math.hypot(wx - p.x, wy - p.y);
-    if (d < minD) { minD = d; closest = i; }
+    // A planet is clickable across its whole disc; small glyphs use hitR.
+    const reach = Math.max(hitR, p.hit || 0);
+    if (d <= reach && d < minD) { minD = d; closest = i; }
   }
   return closest;
 }
@@ -953,6 +1011,15 @@ function showObjectInfo(idx) {
   document.getElementById("obj-radius").textContent = speed > 0
     ? (speed * 42164).toFixed(2) + " km/s" : "—";
   document.getElementById("obj-kind").textContent   = KIND_NAMES[obj.kind] || obj.kind;
+
+  const descEl = document.getElementById("obj-desc");
+  if (obj.description) {
+    descEl.textContent = obj.description;
+    descEl.style.display = "block";
+  } else {
+    descEl.style.display = "none";
+  }
+
   document.getElementById("obj-class").textContent  = "Loading…";
   document.getElementById("obj-conf").textContent   = "—";
   document.getElementById("conf-bar").style.width   = "0%";
@@ -1264,12 +1331,12 @@ async function handleCSVUpload(file) {
 if (typeof module !== "undefined") {
   module.exports = {
     // Constants
-    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANETS, SUN, MOON,
+    KIND_STYLES, KIND_NAMES, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
     // Stateless pure functions
     esc,
     effectiveTime,
     findObjectAt,
-    drawPlanets, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
+    drawPlanetBody, planetRadius, localBodyObjects, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,

@@ -301,6 +301,13 @@ input[type="submit"]:hover { filter: brightness(1.08); }
 .obj-row .key { color: #7a9acc; }
 .obj-row .val { font-family: "SF Mono", "Fira Code", monospace; color: #e4eeff; }
 
+.obj-desc {
+  margin-top: 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #aebfe0;
+}
+
 .obj-class-badge {
   display: inline-block;
   margin-top: 0.25rem;

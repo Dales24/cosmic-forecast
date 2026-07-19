@@ -13,6 +13,7 @@ from app.api import (
     app,
     _propagate_tles,
     _jpl_scene_objects,
+    _planet_scene_objects,
     _simbad_scene_objects,
     _stable_angle,
 )
@@ -64,6 +65,26 @@ def test_get_objects_defaults_when_no_query():
     assert r.status_code == 200
     assert r.json() == {"slug": "comet", "results": []}
     mock_get.assert_called_once_with("comet", date=None, limit=20)
+
+
+def test_get_objects_unknown_slug_returns_404():
+    with patch(
+        "app.data_parser.get_data", side_effect=ValueError("Unknown object slug")
+    ):
+        r = client.get("/api/objects/not_a_real_slug")
+    assert r.status_code == 404
+
+
+def test_get_objects_source_failure_degrades_gracefully():
+    # A single external source failing must not 500 the endpoint.
+    with patch(
+        "app.data_parser.get_data", side_effect=RuntimeError("SIMBAD unreachable")
+    ):
+        r = client.get("/api/objects/galaxy")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["results"] == []
+    assert body["error"] == "source_unavailable"
 
 
 # ── GET /api/classify/{obj_id} ────────────────────────────────────────────────
@@ -186,7 +207,9 @@ def test_forecast_empty_objects_list():
 
 def test_scene_always_includes_ufo():
     """UFO entry is appended even when every data source fails."""
-    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
         r = client.get("/api/scene")
     assert r.status_code == 200
     kinds = [o["kind"] for o in r.json()["objects"]]
@@ -194,7 +217,9 @@ def test_scene_always_includes_ufo():
 
 
 def test_scene_ufo_has_required_fields():
-    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
         r = client.get("/api/scene")
     ufo = next(o for o in r.json()["objects"] if o["kind"] == "ufo")
     for field in (
@@ -211,14 +236,18 @@ def test_scene_ufo_has_required_fields():
 
 
 def test_scene_accepts_datetime_str():
-    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
         r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
     assert r.status_code == 200
     assert "2025-06-01" in r.json()["datetime"]
 
 
 def test_scene_invalid_datetime_falls_back():
-    with _offline_catalogs(patch("app.api._requests.get", side_effect=Exception("x"))):
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
         r = client.get("/api/scene?datetime_str=not-a-date")
     assert r.status_code == 200  # falls back to now, no crash
 
@@ -229,11 +258,9 @@ def test_scene_includes_tle_objects_when_celestrak_responds():
         "1 25544U 98067A   24001.50000000  .00001234  00000-0  27890-4 0  9990\n"
         "2 25544  51.6400 100.0000 0001500  50.0000 310.0000 15.50000000000014\n"
     )
-    mock_resp = MagicMock()
-    mock_resp.text = tle_text
-    mock_resp.raise_for_status = MagicMock()
-
-    with _offline_catalogs(patch("app.api._requests.get", return_value=mock_resp)):
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", return_value=tle_text)
+    ):
         r = client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
 
     assert r.status_code == 200
@@ -250,7 +277,7 @@ def test_scene_passes_user_date_to_jpl():
         return []
 
     with (
-        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x")),
         patch("app.data_parser.fetch_jpl", side_effect=fake_jpl),
         patch("app.data_parser.fetch_simbad", return_value=[]),
     ):
@@ -265,7 +292,7 @@ def test_scene_includes_jpl_and_simbad_objects():
     simbad_records = [{"main_id": "M31", "ra": 10.68, "dec": 41.27}]
 
     with (
-        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x")),
         patch("app.data_parser.fetch_jpl", return_value=jpl_records),
         patch("app.data_parser.fetch_simbad", return_value=simbad_records),
     ):
@@ -285,7 +312,7 @@ def test_scene_includes_deep_space_pack():
     """Black holes, stars, quasars, pulsars, and SNRs reach the scene from SIMBAD."""
     record = [{"main_id": "Cyg X-1", "ra": 299.59, "dec": 35.2}]
     with (
-        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x")),
         patch("app.data_parser.fetch_jpl", return_value=[]),
         patch("app.data_parser.fetch_simbad", return_value=record),
     ):
@@ -293,6 +320,25 @@ def test_scene_includes_deep_space_pack():
 
     kinds = {o["kind"] for o in r.json()["objects"]}
     for kind in ("star", "black_hole", "quasar", "pulsar", "supernova_remnant"):
+        assert kind in kinds, f"missing {kind}"
+
+
+def test_scene_includes_all_orbital_categories():
+    """ISS, satellites, debris, and rocket bodies all reach the scene from TLEs."""
+    tle_text = (
+        "ISS (ZARYA)\n"
+        "1 25544U 98067A   24001.50000000  .00001234  00000-0  27890-4 0  9990\n"
+        "2 25544  51.6400 100.0000 0001500  50.0000 310.0000 15.50000000000014\n"
+    )
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=tle_text),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    kinds = {o["kind"] for o in r.json()["objects"]}
+    for kind in ("iss", "satellite", "space_debris", "rocket_body"):
         assert kind in kinds, f"missing {kind}"
 
 
@@ -305,7 +351,7 @@ def test_scene_is_cached_within_ttl():
         return []
 
     with (
-        patch("app.api._requests.get", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x")),
         patch("app.data_parser.fetch_jpl", side_effect=fake_jpl),
         patch("app.data_parser.fetch_simbad", return_value=[]),
     ):
@@ -372,6 +418,63 @@ def test_simbad_scene_objects_skips_rows_without_coords():
         return_value=[{"main_id": "NoCoords", "ra": None, "dec": None}],
     ):
         assert _simbad_scene_objects("galaxy", "galaxy", limit=4) == []
+
+
+def test_planet_scene_objects_schema_and_placement():
+    dt = datetime(2025, 6, 1, 12, 0, tzinfo=timezone.utc)
+    objs = _planet_scene_objects(dt)
+
+    assert len(objs) == 7  # Mercury..Neptune (Earth is the scene centre)
+    names = [o["name"] for o in objs]
+    assert names[0] == "Mercury" and names[-1] == "Neptune"
+
+    for obj in objs:
+        for field in (
+            "id",
+            "name",
+            "kind",
+            "x_norm",
+            "y_norm",
+            "vx_norm",
+            "vy_norm",
+            "source",
+            "description",
+        ):
+            assert field in obj, f"missing {field}"
+        assert obj["kind"] == "planet"
+        assert obj["source"] == "solar_system"
+        assert obj["description"]
+        # Every orbit lands inside the visible ring band.
+        radius = (obj["x_norm"] ** 2 + obj["y_norm"] ** 2) ** 0.5
+        assert 0.30 <= radius <= 0.94
+
+    # Outer planets sit on wider rings than inner ones.
+    radii = [(o["x_norm"] ** 2 + o["y_norm"] ** 2) ** 0.5 for o in objs]
+    assert radii == sorted(radii)
+
+
+def test_planet_velocity_matches_real_speed():
+    # Mercury's mean orbital velocity is 47.4 km/s; the panel recovers it from
+    # the normalised velocity via the same _NORM_KM factor.
+    mercury = _planet_scene_objects(datetime(2025, 1, 1, tzinfo=timezone.utc))[0]
+    speed = (mercury["vx_norm"] ** 2 + mercury["vy_norm"] ** 2) ** 0.5
+    assert speed * 42164.0 == pytest.approx(47.4, abs=0.5)
+
+
+def test_planet_positions_advance_with_date():
+    a = _planet_scene_objects(datetime(2025, 1, 1, tzinfo=timezone.utc))[0]
+    b = _planet_scene_objects(datetime(2025, 4, 1, tzinfo=timezone.utc))[0]
+    assert (a["x_norm"], a["y_norm"]) != (b["x_norm"], b["y_norm"])
+
+
+def test_scene_includes_planets_when_catalogs_offline():
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        r = client.get("/api/scene")
+    planets = [o for o in r.json()["objects"] if o["kind"] == "planet"]
+    assert len(planets) == 7
+    assert all(o["description"] for o in planets)
 
 
 # ── POST /api/upload/csv ──────────────────────────────────────────────────────

@@ -20,22 +20,40 @@ Data fetchers per object type, sourced from the plan:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import requests
 
 _TIMEOUT = 10  # seconds per request
+
+# CelesTrak returns HTTP 403 ("GP data has not updated since your last
+# successful download") when a group is re-fetched inside its 2-hour update
+# window. We cache each successful download and fall back to it on any failure,
+# so a throttled refresh never empties the scene. Override dir with COSMIC_TLE_CACHE_DIR.
+_TLE_CACHE_DIR = Path(os.environ.get("COSMIC_TLE_CACHE_DIR", "data/tle_cache"))
 
 # ── CelesTrak ─────────────────────────────────────────────────────────────────
 # CelesTrak retired the legacy /pub/TLE/*.txt files (now HTTP 403); use the GP
 # query API. There is no generic "debris" or "rocket-bodies" group, so debris is
 # sourced from a representative field (Cosmos 2251 collision fragments).
 _CELESTRAK_GP = "https://celestrak.org/NORAD/elements/gp.php"
-_CELESTRAK_URLS: dict[str, str] = {
-    "satellite": f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle",
-    "iss": f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle",
-    "space_debris": f"{_CELESTRAK_GP}?GROUP=cosmos-2251-debris&FORMAT=tle",
-    # No GP group for rocket bodies; an unknown group returns an empty TLE blob
-    # (parsed to []) rather than mislabeling debris as rocket bodies.
-    "rocket_body": f"{_CELESTRAK_GP}?GROUP=rocket-bodies&FORMAT=tle",
+# Each slug maps to an ordered list of candidate queries; the first that returns
+# data wins. "active" is the canonical all-satellites catalog but is CelesTrak's
+# most heavily throttled group (403 within its 2h update window), so it falls
+# back to large subsets — otherwise a cold start during a throttle window shows
+# zero satellites.
+_CELESTRAK_URLS: dict[str, list[str]] = {
+    "satellite": [
+        f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle",
+        f"{_CELESTRAK_GP}?GROUP=starlink&FORMAT=tle",
+        f"{_CELESTRAK_GP}?GROUP=last-30-days&FORMAT=tle",
+    ],
+    "iss": [f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle"],
+    "space_debris": [f"{_CELESTRAK_GP}?GROUP=cosmos-2251-debris&FORMAT=tle"],
+    # CelesTrak has no GP group for rocket bodies. They are catalogued with the
+    # "R/B" suffix in the object name, so query by NAME instead of GROUP.
+    "rocket_body": [f"{_CELESTRAK_GP}?NAME=R/B&FORMAT=tle"],
 }
 
 
@@ -66,13 +84,39 @@ def _parse_tle_text(text: str, limit: int) -> list[dict]:
     return records
 
 
-def fetch_celestrak(slug: str, limit: int = 20) -> list[dict]:
-    url = _CELESTRAK_URLS.get(slug)
-    if not url:
+def _tle_cache_path(slug: str) -> Path:
+    return _TLE_CACHE_DIR / f"{slug}.tle"
+
+
+def fetch_celestrak_text(slug: str) -> str:
+    """Fetch a CelesTrak group as raw TLE text, cached on disk.
+
+    Tries each candidate query for the slug in order; the first success is
+    cached and returned. If every candidate fails (notably the 403 CelesTrak
+    returns for an unchanged group) the last cached copy is served instead.
+    Raises only when all candidates fail and no cache exists.
+    """
+    urls = _CELESTRAK_URLS.get(slug)
+    if not urls:
         raise ValueError(f"No CelesTrak URL for slug {slug!r}")
-    resp = requests.get(url, timeout=_TIMEOUT)
-    resp.raise_for_status()
-    return _parse_tle_text(resp.text, limit)
+    path = _tle_cache_path(slug)
+    for url in urls:
+        try:
+            resp = requests.get(url, timeout=_TIMEOUT)
+            resp.raise_for_status()
+        except Exception:
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(resp.text)
+        return resp.text
+
+    if path.exists():
+        return path.read_text()
+    raise RuntimeError(f"All CelesTrak sources failed for slug {slug!r}")
+
+
+def fetch_celestrak(slug: str, limit: int = 20) -> list[dict]:
+    return _parse_tle_text(fetch_celestrak_text(slug), limit)
 
 
 # ── NASA JPL Small-Body Database / CNEOS ─────────────────────────────────────
@@ -100,10 +144,10 @@ _SIMBAD_TAP = "https://simbad.u-strasbg.fr/simbad/sim-tap/sync"
 
 _SIMBAD_OTYPES: dict[str, str] = {
     "galaxy": "G",
-    "nebula": "PN",  # planetary nebula; broaden with LIKE 'PN%' below
+    "nebula": "PN",  # planetary nebula
     "star_cluster": "Cl*",
     "variable_star": "V*",
-    "star": "*",  # LIKE '*%' catches single/double/peculiar stars
+    "star": "*",
     "black_hole": "BH",
     "quasar": "QSO",
     "pulsar": "Psr",
@@ -115,9 +159,11 @@ def fetch_simbad(slug: str, limit: int = 20) -> list[dict]:
     otype = _SIMBAD_OTYPES.get(slug)
     if not otype:
         raise ValueError(f"No SIMBAD otype for slug {slug!r}")
+    # SIMBAD's `otype` column rejects LIKE ("LIKE not supported on otype"); it
+    # only supports exact equality, which already matches the type's subtree.
     adql = (
         f"SELECT TOP {limit} main_id, otype, ra, dec "
-        f"FROM basic WHERE otype LIKE '{otype}%'"
+        f"FROM basic WHERE otype = '{otype}'"
     )
     resp = requests.get(
         _SIMBAD_TAP,
