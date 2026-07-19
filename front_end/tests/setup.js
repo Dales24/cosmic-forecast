@@ -14,6 +14,7 @@ document.body.innerHTML = `
       <option value="cosmic">Purple Cosmic</option>
       <option value="vangogh">Van Gogh</option>
       <option value="burton">Tim Burton</option>
+      <option value="pirate">Pirate</option>
     </select>
   </div>
   <div id="form-view" style="display:block"></div>

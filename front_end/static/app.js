@@ -268,6 +268,17 @@ const THEMES = {
       { x: .55, y: .18, r: .34, c: "rgba(60, 60, 72, 0.22)" },
     ],
   },
+  pirate: {
+    label: "Pirate",
+    stars: ["#fff4d0", "#f5d98a", "#ffe9a8", "#d9b36a", "#bfa878"],
+    grad: ["#2a1d0c", "#150d04", "#070401"],
+    milkyWay: "210, 175, 95",
+    clouds: [
+      { x: .22, y: .30, r: .42, c: "rgba(150, 110, 45, 0.20)" },
+      { x: .78, y: .62, r: .50, c: "rgba(70, 130, 120, 0.16)" },
+      { x: .55, y: .18, r: .34, c: "rgba(185, 140, 60, 0.12)" },
+    ],
+  },
 };
 
 const DEFAULT_THEME = "cosmic";
@@ -1010,7 +1021,7 @@ window.addEventListener("resize", () => { resize(); initStars(320); });
 function setTheme(name) {
   const key = THEMES[name] ? name : DEFAULT_THEME;
   currentTheme = THEMES[key];
-  document.body.classList.remove("theme-cosmic", "theme-vangogh", "theme-burton");
+  for (const t of Object.keys(THEMES)) document.body.classList.remove("theme-" + t);
   document.body.classList.add("theme-" + key);
   const select = document.getElementById("theme-select");
   if (select && select.value !== key) select.value = key;

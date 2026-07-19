@@ -39,6 +39,19 @@
   --btn-b: #6a8a3a;
 }
 
+/* Weathered treasure-map: aged parchment + gold, on a dark sea-brown night. */
+.theme-pirate {
+  --bg: #140d04;
+  --text: #f0e0b8;
+  --text-dim: #b09a6a;
+  --accent: #d9a441;
+  --accent-strong: #f5c95c;
+  --accent-rgb: 217, 164, 65;
+  --accent2: #4fa3a3;
+  --btn-a: #8a5a1e;
+  --btn-b: #b8863a;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {

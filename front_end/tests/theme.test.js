@@ -6,8 +6,8 @@
 const app = global._app;
 
 describe('THEMES data', () => {
-  test('the three named themes exist with a palette', () => {
-    for (const key of ['cosmic', 'vangogh', 'burton']) {
+  test('the named themes exist with a palette', () => {
+    for (const key of ['cosmic', 'vangogh', 'burton', 'pirate']) {
       const t = app.THEMES[key];
       expect(t).toBeDefined();
       expect(t.label).toBeTruthy();
@@ -53,6 +53,14 @@ describe('setTheme()', () => {
   test('remembers the choice in localStorage', () => {
     app.setTheme('vangogh');
     expect(localStorage.getItem('cosmicTheme')).toBe('vangogh');
+  });
+
+  test('pirate mode applies and replaces the previous theme class', () => {
+    app.setTheme('cosmic');
+    app.setTheme('pirate');
+    expect(app.currentTheme).toBe(app.THEMES.pirate);
+    expect(document.body.classList.contains('theme-pirate')).toBe(true);
+    expect(document.body.classList.contains('theme-cosmic')).toBe(false);
   });
 
   test('an unknown theme name falls back to the default', () => {
