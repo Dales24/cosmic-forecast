@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · Cosmic Forecast</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-mode">
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("cosmicTheme"); } catch (e) { /* ignore */ }
+      document.body.classList.add("theme-" + (t || "default"));
+    })();
+  </script>
+
+  <nav class="top-nav">
+    <a href="/">Map</a>
+    <a href="/help">Help</a>
+    <a href="/profile">Profile</a>
+    <a href="/admin">Admin</a>
+  </nav>
+
+  <main class="page">
+    <h1>Admin · API Health</h1>
+    <p class="lead">Live request metrics and data-source status. Admin only.</p>
+
+    <div id="admin-body">
+      <div class="page-card"><p class="profile-empty">Loading…</p></div>
+    </div>
+  </main>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

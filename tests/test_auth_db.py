@@ -106,6 +106,99 @@ def test_save_theme_rejects_empty(client):
     assert r.status_code == 422
 
 
+# ── admin mode ────────────────────────────────────────────────────────────────
+def test_regular_user_is_not_admin(client):
+    headers = _auth(client, "regular")
+    assert client.get("/api/auth/me", headers=headers).json()["is_admin"] is False
+
+
+def test_admin_designated_by_env(client, monkeypatch):
+    monkeypatch.setenv("COSMIC_ADMIN_USERS", "bosslady, someoneelse")
+    headers = _auth(client, "bosslady")
+    assert client.get("/api/auth/me", headers=headers).json()["is_admin"] is True
+
+
+def test_admin_health_requires_admin(client, monkeypatch):
+    # Unauthenticated -> 401; authenticated-but-not-admin -> 403.
+    assert client.get("/api/admin/health").status_code == 401
+    headers = _auth(client, "peon")
+    assert client.get("/api/admin/health", headers=headers).status_code == 403
+
+
+def test_admin_health_returns_metrics_for_admin(client, monkeypatch):
+    monkeypatch.setenv("COSMIC_ADMIN_USERS", "chief")
+    headers = _auth(client, "chief")
+    r = client.get("/api/admin/health", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert "uptime_seconds" in data
+    assert "total_requests" in data
+    assert "status_classes" in data
+    assert "recent_errors" in data
+
+
+def test_default_admin_bootstrap_login(client):
+    from app.api import _ensure_admin_user
+
+    _ensure_admin_user()
+    token = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin"}
+    ).json()["token"]
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200 and me.json()["is_admin"] is True
+
+
+# ── user-added scene objects ──────────────────────────────────────────────────
+def test_add_list_and_delete_custom_object(client):
+    headers = _auth(client, "maker")
+    body = {"name": "My Probe", "kind": "satellite", "x_norm": 0.2, "y_norm": -0.1}
+    obj = client.post("/api/custom-objects", json=body, headers=headers).json()
+    assert obj["source"] == "custom" and obj["name"] == "My Probe"
+
+    listed = client.get("/api/custom-objects", headers=headers).json()["objects"]
+    assert len(listed) == 1 and listed[0]["kind"] == "satellite"
+
+    assert (
+        client.delete(f"/api/custom-objects/{obj['id']}", headers=headers).status_code
+        == 204
+    )
+    assert client.get("/api/custom-objects", headers=headers).json()["objects"] == []
+
+
+def test_add_custom_object_requires_auth(client):
+    body = {"name": "X", "kind": "satellite", "x_norm": 0.0, "y_norm": 0.0}
+    assert client.post("/api/custom-objects", json=body).status_code == 401
+
+
+def test_add_custom_object_rejects_unknown_kind(client):
+    headers = _auth(client, "builder")
+    body = {"name": "X", "kind": "dragon", "x_norm": 0.0, "y_norm": 0.0}
+    assert (
+        client.post("/api/custom-objects", json=body, headers=headers).status_code
+        == 422
+    )
+
+
+def test_add_custom_object_rejects_empty_name(client):
+    headers = _auth(client, "namer")
+    body = {"name": "  ", "kind": "satellite", "x_norm": 0.0, "y_norm": 0.0}
+    assert (
+        client.post("/api/custom-objects", json=body, headers=headers).status_code
+        == 422
+    )
+
+
+def test_custom_objects_are_per_user(client):
+    a = _auth(client, "alice_c")
+    b = _auth(client, "bob_c")
+    client.post(
+        "/api/custom-objects",
+        json={"name": "A obj", "kind": "comet", "x_norm": 0.1, "y_norm": 0.1},
+        headers=a,
+    )
+    assert client.get("/api/custom-objects", headers=b).json()["objects"] == []
+
+
 # ── saved searches ────────────────────────────────────────────────────────────
 def test_save_list_and_delete_search(client):
     headers = _auth(client, "grace")

@@ -29,6 +29,29 @@ _front_end = os.path.join(_root, "front_end")
 
 app = FastAPI(title="Cosmic Forecast")
 
+
+# ── Request metrics (for the admin health monitor) ────────────────────────────
+@app.middleware("http")
+async def _record_metrics(request, call_next):
+    from app.metrics import metrics
+
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        metrics.record(
+            request.method, request.url.path, 500, (time.perf_counter() - start) * 1000
+        )
+        raise
+    metrics.record(
+        request.method,
+        request.url.path,
+        response.status_code,
+        (time.perf_counter() - start) * 1000,
+    )
+    return response
+
+
 # ── Lazy CNN state ────────────────────────────────────────────────────────────
 _cnn_model = None
 
@@ -657,12 +680,20 @@ class PreferencesIn(BaseModel):
     theme: str
 
 
+class CustomObjectIn(BaseModel):
+    name: str
+    kind: str
+    x_norm: float
+    y_norm: float
+
+
 def _public_user(user) -> dict:
     return {
         "id": user["id"],
         "username": user["username"],
         "email": user["email"],
         "theme": user["theme"],
+        "is_admin": bool(user["is_admin"]),
     }
 
 
@@ -729,6 +760,108 @@ def api_delete_upload(upload_id: int, user=Depends(auth.current_user)):
         raise HTTPException(404, "upload not found")
 
 
+# ── User-added scene objects ──────────────────────────────────────────────────
+def _valid_kind(kind: str) -> bool:
+    from app.object_classes import CLASS_SLUGS
+
+    return kind in CLASS_SLUGS
+
+
+@app.get("/api/custom-objects")
+def api_list_custom_objects(user=Depends(auth.current_user)):
+    return {"objects": db.list_custom_objects(user["id"])}
+
+
+@app.post("/api/custom-objects")
+def api_add_custom_object(body: CustomObjectIn, user=Depends(auth.current_user)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "name must not be empty")
+    if not _valid_kind(body.kind):
+        raise HTTPException(422, f"unknown kind: {body.kind!r}")
+    # Clamp to the map so a bad value can't fling an object off-screen.
+    x = max(-1.5, min(1.5, body.x_norm))
+    y = max(-1.5, min(1.5, body.y_norm))
+    object_id = db.add_custom_object(user["id"], name, body.kind, x, y)
+    return {
+        "id": object_id,
+        "name": name,
+        "kind": body.kind,
+        "x_norm": x,
+        "y_norm": y,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 0.0,
+        "source": "custom",
+    }
+
+
+@app.delete("/api/custom-objects/{object_id}", status_code=204)
+def api_delete_custom_object(object_id: int, user=Depends(auth.current_user)):
+    if not db.delete_custom_object(user["id"], object_id):
+        raise HTTPException(404, "custom object not found")
+
+
+# ── Admin: API health monitor ─────────────────────────────────────────────────
+def _probe_sources() -> dict:
+    """Live reachability check of the external data sources (short timeouts)."""
+    import requests
+
+    checks = {
+        "celestrak": "https://celestrak.org/NORAD/elements/gp.php"
+        "?GROUP=stations&FORMAT=tle",
+        "jpl": "https://ssd-api.jpl.nasa.gov/cad.api"
+        "?date-min=now&date-max=%2B1&dist-max=0.05&limit=1",
+        "simbad": "https://simbad.u-strasbg.fr/simbad/sim-tap/sync"
+        "?REQUEST=doQuery&LANG=ADQL&FORMAT=json&QUERY=SELECT+TOP+1+main_id+FROM+basic",
+    }
+    out: dict = {}
+    for name, url in checks.items():
+        start = time.perf_counter()
+        try:
+            resp = requests.get(url, timeout=6)
+            out[name] = {
+                "ok": resp.ok,
+                "status": resp.status_code,
+                "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+            }
+        except Exception as exc:
+            out[name] = {
+                "ok": False,
+                "status": None,
+                "error": type(exc).__name__,
+                "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+            }
+    return out
+
+
+@app.get("/api/admin/health")
+def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admin)):
+    from app.metrics import metrics
+
+    data = metrics.snapshot()
+    if check_sources:
+        data["sources"] = _probe_sources()
+    return data
+
+
+def _ensure_admin_user() -> None:
+    """Dev convenience: a default admin/admin login, created if it's missing.
+
+    Bypasses the normal password-length rule on purpose — replace with a real
+    admin before any real deployment.
+    """
+    if db.get_user_by_username("admin"):
+        return
+    pw_hash, salt = auth.hash_password("admin")
+    db.create_user("admin", None, pw_hash, salt, is_admin=True)
+
+
+@app.on_event("startup")
+def _bootstrap_admin() -> None:
+    _ensure_admin_user()
+
+
 # ── Static files + SPA fallback ───────────────────────────────────────────────
 app.mount(
     "/static", StaticFiles(directory=os.path.join(_front_end, "static")), name="static"
@@ -748,6 +881,11 @@ def help_page():
 @app.get("/profile")
 def profile_page():
     return FileResponse(os.path.join(_front_end, "profile.html"))
+
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse(os.path.join(_front_end, "admin.html"))
 
 
 if __name__ == "__main__":

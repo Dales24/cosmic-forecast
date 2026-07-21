@@ -59,6 +59,13 @@ def test_profile_page_served():
     assert "Profile" in r.text
 
 
+def test_admin_page_served():
+    r = client.get("/admin")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "Admin" in r.text
+
+
 # ── GET /api/objects/{object_slug} ────────────────────────────────────────────
 
 

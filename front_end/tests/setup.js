@@ -26,6 +26,14 @@ document.body.innerHTML = `
     <input id="obs_datetime" type="datetime-local">
     <input type="submit">
   </form>
+  <form id="add-object-form">
+    <input id="add-name" type="text">
+    <select id="add-kind"></select>
+    <select id="add-band"></select>
+    <input id="add-ra" type="number" value="90">
+    <input type="submit">
+  </form>
+  <p id="add-object-note"></p>
   <div id="scene-result"></div>
   <div id="obj-title"></div>
   <div id="obj-class"></div>

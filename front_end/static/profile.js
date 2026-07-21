@@ -52,7 +52,17 @@
     $("account").innerHTML =
       field("Username", "@" + me.username) +
       field("Email", me.email || "—") +
-      field("Theme", me.theme || "default");
+      field("Theme", me.theme || "default") +
+      field("Role", me.is_admin ? "Admin" : "Member");
+
+    if (me.is_admin) {
+      const card = document.createElement("div");
+      card.className = "page-card";
+      card.innerHTML =
+        '<h2>Admin</h2><p class="profile-empty">' +
+        'You have admin access. <a href="/admin">Open the API health monitor →</a></p>';
+      document.querySelector(".page").appendChild(card);
+    }
 
     loadList("/api/searches", "searches", "searches", (s) => {
       const p = s.params || {};

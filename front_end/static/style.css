@@ -435,6 +435,14 @@ input[type="submit"]:hover { filter: brightness(1.08); }
 
 .obj-info-link:hover { color: var(--accent-strong); border-color: var(--accent-strong); }
 
+.add-object-note {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--accent-strong);
+  min-height: 1rem;
+}
+
 .obj-class-badge {
   display: inline-block;
   margin-top: 0.25rem;

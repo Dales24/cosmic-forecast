@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
     created_at    TEXT NOT NULL,
-    theme         TEXT
+    theme         TEXT,
+    is_admin      INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -44,6 +45,15 @@ CREATE TABLE IF NOT EXISTS saved_uploads (
     filename   TEXT NOT NULL,
     kind       TEXT,
     result     TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS custom_objects (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    x_norm     REAL NOT NULL,
+    y_norm     REAL NOT NULL,
     created_at TEXT NOT NULL
 );
 """
@@ -77,6 +87,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     if "theme" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN theme TEXT")
+    if "is_admin" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
 
 
 def _now() -> str:
@@ -85,16 +97,28 @@ def _now() -> str:
 
 # ── users ─────────────────────────────────────────────────────────────────────
 def create_user(
-    username: str, email: Optional[str], password_hash: str, salt: str
+    username: str,
+    email: Optional[str],
+    password_hash: str,
+    salt: str,
+    is_admin: bool = False,
 ) -> int:
     with closing(get_conn()) as conn:
         cur = conn.execute(
-            "INSERT INTO users (username, email, password_hash, salt, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (username, email, password_hash, salt, _now()),
+            "INSERT INTO users (username, email, password_hash, salt, created_at, "
+            "is_admin) VALUES (?, ?, ?, ?, ?, ?)",
+            (username, email, password_hash, salt, _now(), int(is_admin)),
         )
         conn.commit()
         return cur.lastrowid
+
+
+def set_user_admin(user_id: int, is_admin: bool) -> None:
+    with closing(get_conn()) as conn:
+        conn.execute(
+            "UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id)
+        )
+        conn.commit()
 
 
 def get_user_by_username(username: str) -> Optional[sqlite3.Row]:
@@ -218,5 +242,49 @@ def _upload_dict(row: sqlite3.Row) -> dict:
         "filename": row["filename"],
         "kind": row["kind"],
         "result": json.loads(row["result"]),
+        "created_at": row["created_at"],
+    }
+
+
+# ── custom scene objects ──────────────────────────────────────────────────────
+def add_custom_object(
+    user_id: int, name: str, kind: str, x_norm: float, y_norm: float
+) -> int:
+    with closing(get_conn()) as conn:
+        cur = conn.execute(
+            "INSERT INTO custom_objects (user_id, name, kind, x_norm, y_norm, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, name, kind, x_norm, y_norm, _now()),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_custom_objects(user_id: int) -> list:
+    with closing(get_conn()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM custom_objects WHERE user_id = ? ORDER BY id DESC",
+            (user_id,),
+        ).fetchall()
+    return [_custom_object_dict(r) for r in rows]
+
+
+def delete_custom_object(user_id: int, object_id: int) -> bool:
+    with closing(get_conn()) as conn:
+        cur = conn.execute(
+            "DELETE FROM custom_objects WHERE id = ? AND user_id = ?",
+            (object_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def _custom_object_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "kind": row["kind"],
+        "x_norm": row["x_norm"],
+        "y_norm": row["y_norm"],
         "created_at": row["created_at"],
     }

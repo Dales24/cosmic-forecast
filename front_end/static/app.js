@@ -172,6 +172,65 @@ function effectiveTime(real) {
 }
 
 // ── Load scene from API ───────────────────────────────────────────────────────
+// ── User-added objects ──────────────────────────────────────────────────────
+// Distance presets map to the scene's radial bands (Earth 0 → deep sky ~0.95).
+const DISTANCE_BANDS = {
+  "Low orbit (LEO)": 0.12,
+  "Geostationary": 0.21,
+  "Moon distance": 0.34,
+  "Inner planets": 0.68,
+  "Outer planets": 0.85,
+  "Deep sky": 0.95,
+};
+
+// Scene x/y for a distance band + real right ascension (degrees).
+function customObjectXY(bandLabel, raDeg) {
+  const radius = DISTANCE_BANDS[bandLabel] ?? 0.5;
+  const ra = (Number(raDeg) || 0) * Math.PI / 180;
+  return { x: radius * Math.cos(ra), y: radius * Math.sin(ra) };
+}
+
+// Append an object to the live scene (and keep objPositions in step).
+function addToScene(obj) {
+  sceneObjects.push(obj);
+  objPositions.push({ x: 0, y: 0 });
+  updateLegend();
+}
+
+function _token() {
+  try { return localStorage.getItem("cf_token"); } catch { return null; }
+}
+
+// Merge the signed-in user's saved custom objects into the scene.
+async function mergeCustomObjects() {
+  const token = _token();
+  if (!token) return;
+  try {
+    const r = await fetch("/api/custom-objects", {
+      headers: { Authorization: "Bearer " + token },
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const o of (data.objects || [])) {
+      sceneObjects.push({
+        ...o, source: "custom", vx_norm: 0, vy_norm: 0, speed_kms: 0,
+      });
+    }
+  } catch { /* offline — skip */ }
+}
+
+async function persistCustomObject(name, kind, x, y) {
+  const token = _token();
+  if (!token) return;
+  try {
+    await fetch("/api/custom-objects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ name, kind, x_norm: x, y_norm: y }),
+    });
+  } catch { /* offline — object still shows this session */ }
+}
+
 async function loadScene(datetimeISO) {
   updateLegendLoading(true);
   try {
@@ -179,6 +238,7 @@ async function loadScene(datetimeISO) {
     const resp = await fetch("/api/scene" + qs);
     const data = await resp.json();
     sceneObjects = data.objects || [];
+    await mergeCustomObjects(); // the user's own saved objects
     syncLocalBodies(); // point the Sun/Moon artwork at their real positions
   } catch {
     // keep whatever we had
@@ -1111,10 +1171,50 @@ if (_themeSelect) {
   });
 }
 
+// ── Add-object form ──────────────────────────────────────────────────────────
+function initAddObjectForm() {
+  const form = document.getElementById("add-object-form");
+  const kindSel = document.getElementById("add-kind");
+  const bandSel = document.getElementById("add-band");
+  if (!form || !kindSel || !bandSel) return;
+
+  const SINGLETONS = new Set(["sun", "earth", "moon"]);
+  for (const [kind, label] of Object.entries(KIND_NAMES)) {
+    if (SINGLETONS.has(kind)) continue; // one-of-a-kind bodies aren't user-addable
+    kindSel.appendChild(new Option(label, kind));
+  }
+  kindSel.value = "satellite";
+  for (const band of Object.keys(DISTANCE_BANDS)) {
+    bandSel.appendChild(new Option(band, band));
+  }
+  bandSel.value = "Low orbit (LEO)";
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("add-name").value.trim();
+    if (!name) return;
+    const kind = kindSel.value;
+    const { x, y } = customObjectXY(bandSel.value, document.getElementById("add-ra").value);
+    addToScene({
+      name, kind, x_norm: x, y_norm: y,
+      vx_norm: 0, vy_norm: 0, speed_kms: 0, source: "custom",
+    });
+    await persistCustomObject(name, kind, x, y);
+    document.getElementById("add-name").value = "";
+    const note = document.getElementById("add-object-note");
+    if (note) {
+      note.textContent = _token()
+        ? `Added “${name}” — saved to your profile.`
+        : `Added “${name}” — log in to keep it across reloads.`;
+    }
+  });
+}
+
 resize(); // size the canvas first
 let _savedTheme = null;
 try { _savedTheme = localStorage.getItem("cosmicTheme"); } catch { /* ignore */ }
 setTheme(_savedTheme || DEFAULT_THEME); // paints the themed backdrop + star field
+initAddObjectForm();
 requestAnimationFrame(frame);
 
 // ── Hit testing ───────────────────────────────────────────────────────────────
@@ -1484,7 +1584,7 @@ if (typeof module !== "undefined") {
     esc,
     effectiveTime,
     findObjectAt,
-    setTheme, kindStyle, mixHex,
+    setTheme, kindStyle, mixHex, DISTANCE_BANDS, customObjectXY, addToScene,
     drawPlanetBody, planetRadius, bodyDiscR, syncLocalBodies, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,

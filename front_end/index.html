@@ -76,6 +76,30 @@
 
         <div class="section-divider"></div>
 
+        <div class="add-object">
+          <h3 class="upload-title">Add Object to Scene</h3>
+          <form id="add-object-form">
+            <label for="add-name">Name</label>
+            <input id="add-name" type="text" placeholder="e.g. My Probe" required>
+            <div class="coord-row">
+              <div>
+                <label for="add-kind">Type</label>
+                <select id="add-kind" class="theme-select"></select>
+              </div>
+              <div>
+                <label for="add-band">Distance</label>
+                <select id="add-band" class="theme-select"></select>
+              </div>
+            </div>
+            <label for="add-ra">Direction — Right Ascension (0–360°)</label>
+            <input id="add-ra" type="number" min="0" max="360" step="1" value="90">
+            <input type="submit" value="✦ Add Object">
+          </form>
+          <p class="add-object-note" id="add-object-note"></p>
+        </div>
+
+        <div class="section-divider"></div>
+
         <div class="upload-classifier">
           <h3 class="upload-title">Classify Image Patch</h3>
           <div class="upload-zone" id="upload-zone">
