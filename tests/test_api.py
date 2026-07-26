@@ -716,3 +716,18 @@ def test_propagate_tles_without_sgp4_returns_empty():
             sys.modules["sgp4.api"] = saved
         else:
             sys.modules.pop("sgp4.api", None)
+
+
+# ── Static delivery: compression + browser caching ────────────────────────────
+def test_static_assets_are_cacheable():
+    """Static files carry a Cache-Control header so browsers don't refetch them."""
+    resp = client.get("/static/app.js")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "public, max-age=3600"
+
+
+def test_large_static_assets_are_gzipped():
+    """The GZip middleware compresses sizeable assets when the client accepts it."""
+    resp = client.get("/static/app.js", headers={"accept-encoding": "gzip"})
+    assert resp.status_code == 200
+    assert resp.headers.get("content-encoding") == "gzip"

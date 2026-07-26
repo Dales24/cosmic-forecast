@@ -1,5 +1,5 @@
 /**
- * Object facts + the "Further info" placeholder link shown in the detail panel.
+ * Object facts + the per-kind "Learn more at NASA" link shown in the detail panel.
  */
 
 const app = global._app;
@@ -9,6 +9,16 @@ describe('KIND_FACTS', () => {
     for (const kind of Object.keys(app.KIND_NAMES)) {
       expect(typeof app.KIND_FACTS[kind]).toBe('string');
       expect(app.KIND_FACTS[kind].length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('KIND_LINKS', () => {
+  test('every rendered kind links to an official NASA page', () => {
+    for (const kind of Object.keys(app.KIND_NAMES)) {
+      const url = app.KIND_LINKS[kind];
+      expect(typeof url).toBe('string');
+      expect(url).toMatch(/^https:\/\/[a-z.]*nasa\.gov\//);
     }
   });
 });
@@ -31,10 +41,23 @@ describe('detail panel facts', () => {
     expect(document.getElementById('obj-desc').textContent).toBe('The red planet.');
   });
 
-  test('the "Further info" placeholder link is present', () => {
+  test('points the info link at the kind\'s NASA page, opening in a new tab', () => {
+    app.sceneObjects = [{ name: '433 Eros', kind: 'asteroid', x_norm: 0.3, y_norm: 0.1 }];
+    app.objPositions = [{ x: 0, y: 0 }];
+    app.showObjectInfo(0);
     const link = document.getElementById('obj-info-link');
-    expect(link).not.toBeNull();
-    expect(link.textContent).toMatch(/further info/i);
-    expect(link.getAttribute('href')).toBe('#'); // placeholder for later
+    expect(link.getAttribute('href')).toBe(app.KIND_LINKS.asteroid);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.textContent).toMatch(/nasa/i);
+    expect(link.style.display).not.toBe('none');
+  });
+
+  test('hides the info link when the kind has no NASA page', () => {
+    app.sceneObjects = [{ name: 'Mystery', kind: 'made_up_kind', x_norm: 0.1, y_norm: 0.1 }];
+    app.objPositions = [{ x: 0, y: 0 }];
+    app.showObjectInfo(0);
+    const link = document.getElementById('obj-info-link');
+    expect(link.style.display).toBe('none');
+    expect(link.hasAttribute('href')).toBe(false);
   });
 });

@@ -13,6 +13,7 @@ from math import atan2, cos, log10, pi, sin, sqrt
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -28,6 +29,10 @@ if _root not in sys.path:
 _front_end = os.path.join(_root, "front_end")
 
 app = FastAPI(title="Cosmic Forecast")
+
+# Compress text responses (JS/CSS/HTML/JSON) over ~1 KB — the 64 KB app.js and
+# 21 KB stylesheet shrink by roughly 70% on the wire.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 # ── Request metrics (for the admin health monitor) ────────────────────────────
@@ -863,8 +868,24 @@ def _bootstrap_admin() -> None:
 
 
 # ── Static files + SPA fallback ───────────────────────────────────────────────
+_STATIC_MAX_AGE = 3600  # 1 hour; StaticFiles' ETag still forces revalidation after.
+
+
+class _CachedStaticFiles(StaticFiles):
+    """StaticFiles that lets browsers cache assets instead of refetching every load."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.setdefault(
+            "Cache-Control", f"public, max-age={_STATIC_MAX_AGE}"
+        )
+        return response
+
+
 app.mount(
-    "/static", StaticFiles(directory=os.path.join(_front_end, "static")), name="static"
+    "/static",
+    _CachedStaticFiles(directory=os.path.join(_front_end, "static")),
+    name="static",
 )
 
 

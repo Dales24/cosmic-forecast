@@ -80,6 +80,34 @@ const KIND_FACTS = {
   ufo:               "An object with no catalogued match — origin unknown.",
 };
 
+// Per-kind "learn more" link, pointing at the authoritative NASA page for that
+// class of object. Shown alongside the fact in the detail panel.
+const KIND_LINKS = {
+  iss:               "https://www.nasa.gov/international-space-station/",
+  satellite:         "https://www.nasa.gov/learning-resources/for-kids-and-students/what-is-a-satellite-grades-5-8/",
+  space_debris:      "https://orbitaldebris.jsc.nasa.gov/",
+  rocket_body:       "https://orbitaldebris.jsc.nasa.gov/",
+  asteroid:          "https://science.nasa.gov/solar-system/asteroids/",
+  comet:             "https://science.nasa.gov/solar-system/comets/",
+  near_earth_object: "https://science.nasa.gov/planetary-defense/",
+  meteor:            "https://science.nasa.gov/solar-system/meteors-meteorites/",
+  meteoroid:         "https://science.nasa.gov/solar-system/meteors-meteorites/",
+  galaxy:            "https://science.nasa.gov/universe/galaxies/",
+  nebula:            "https://science.nasa.gov/universe/",
+  star_cluster:      "https://science.nasa.gov/universe/stars/",
+  variable_star:     "https://science.nasa.gov/universe/stars/types/",
+  star:              "https://science.nasa.gov/universe/stars/",
+  black_hole:        "https://science.nasa.gov/universe/black-holes/",
+  quasar:            "https://science.nasa.gov/universe/black-holes/",
+  pulsar:            "https://science.nasa.gov/universe/stars/types/",
+  supernova_remnant: "https://science.nasa.gov/universe/stars/",
+  planet:            "https://science.nasa.gov/solar-system/planets/",
+  sun:               "https://science.nasa.gov/sun/",
+  earth:             "https://science.nasa.gov/earth/",
+  moon:              "https://science.nasa.gov/moon/",
+  ufo:               "https://science.nasa.gov/uap/",
+};
+
 // Decorative orbital guide rings (visual only, not tied to real orbits)
 const orbits = [
   { radius: 0.14, tilt:  0.2  },
@@ -1262,10 +1290,24 @@ function showObjectInfo(idx) {
   // A fact for the object: its own description (solar-system bodies) if present,
   // otherwise the per-kind fallback.
   const fact = obj.description || KIND_FACTS[obj.kind] || "";
+  const link = KIND_LINKS[obj.kind] || "";
   const descEl = document.getElementById("obj-desc");
   const aboutEl = document.getElementById("obj-about");
+  const linkEl = document.getElementById("obj-info-link");
   if (descEl) descEl.textContent = fact;
-  if (aboutEl) aboutEl.style.display = fact ? "block" : "none";
+  if (linkEl) {
+    if (link) {
+      linkEl.href = link;
+      linkEl.target = "_blank";
+      linkEl.textContent = "Learn more at NASA →";
+      linkEl.style.display = "";
+    } else {
+      linkEl.removeAttribute("href");
+      linkEl.style.display = "none";
+    }
+  }
+  // The panel is worth showing if there's either a fact or a link.
+  if (aboutEl) aboutEl.style.display = fact || link ? "block" : "none";
 
   document.getElementById("obj-class").textContent  = "Loading…";
   document.getElementById("obj-conf").textContent   = "—";
@@ -1578,7 +1620,7 @@ async function handleCSVUpload(file) {
 if (typeof module !== "undefined") {
   module.exports = {
     // Constants
-    KIND_STYLES, KIND_NAMES, KIND_FACTS, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
+    KIND_STYLES, KIND_NAMES, KIND_FACTS, KIND_LINKS, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
     THEMES, DEFAULT_THEME,
     // Stateless pure functions
     esc,
