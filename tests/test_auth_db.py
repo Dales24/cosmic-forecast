@@ -137,6 +137,32 @@ def test_admin_health_returns_metrics_for_admin(client, monkeypatch):
     assert "recent_errors" in data
 
 
+def test_admin_health_reports_scene_object_caps(client, monkeypatch):
+    """Admins can see how many objects each scene cap kept off the map."""
+    from app.metrics import scene_cap_report
+
+    monkeypatch.setenv("COSMIC_ADMIN_USERS", "chief")
+    headers = _auth(client, "chief")
+    scene_cap_report.record(
+        [
+            {
+                "kind": "satellite",
+                "shown": 40,
+                "cap": 40,
+                "hidden": 11000,
+                "hidden_exact": True,
+            }
+        ]
+    )
+    try:
+        caps = client.get("/api/admin/health", headers=headers).json()["scene_caps"]
+    finally:
+        scene_cap_report.reset()
+
+    assert caps["total_hidden"] == 11000
+    assert caps["kinds"][0]["kind"] == "satellite"
+
+
 def test_default_admin_bootstrap_login(client):
     from app.api import _ensure_admin_user
 

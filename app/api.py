@@ -3,6 +3,7 @@
 # restores the compatibility shim. Must precede any tensorflow import.
 import setuptools  # noqa: F401
 
+import logging
 import sys
 import os
 import time
@@ -10,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
 from math import atan2, cos, log10, pi, sin, sqrt
+from typing import Iterator, NamedTuple
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
@@ -18,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, db
+from app import auth, config, db
 
 # Add project root so `app.*` imports work when run from app/ directory
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +31,7 @@ if _root not in sys.path:
 _front_end = os.path.join(_root, "front_end")
 
 app = FastAPI(title="Cosmic Forecast")
+log = logging.getLogger(__name__)
 
 # Compress text responses (JS/CSS/HTML/JSON) over ~1 KB — the 64 KB app.js and
 # 21 KB stylesheet shrink by roughly 70% on the wire.
@@ -103,40 +106,47 @@ def _scene_radius(distance_km: float) -> float:
 
 
 # ── TLE position propagation ──────────────────────────────────────────────────
+def _iter_tle_sets(tle_text: str) -> Iterator[tuple[str, str, str]]:
+    """Yield (name, line1, line2) for every well-formed TLE set in the text."""
+    lines = [ln.strip() for ln in tle_text.splitlines() if ln.strip()]
+    i = 0
+    while i < len(lines):
+        if (
+            i + 2 < len(lines)
+            and lines[i + 1].startswith("1 ")
+            and lines[i + 2].startswith("2 ")
+        ):
+            yield lines[i], lines[i + 1], lines[i + 2]
+            i += 3
+        else:
+            i += 1
+
+
 def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[dict]:
     try:
         from sgp4.api import Satrec, jday as sgp4_jday
     except ImportError:
         return []
 
-    lines = [ln.strip() for ln in tle_text.splitlines() if ln.strip()]
     results: list[dict] = []
-    i = 0
-    while i < len(lines) and len(results) < limit:
-        if (
-            i + 2 < len(lines)
-            and lines[i + 1].startswith("1 ")
-            and lines[i + 2].startswith("2 ")
-        ):
-            name, l1, l2 = lines[i], lines[i + 1], lines[i + 2]
-            try:
-                sat = Satrec.twoline2rv(l1, l2)
-                jd, fr = sgp4_jday(
-                    dt.year,
-                    dt.month,
-                    dt.day,
-                    dt.hour,
-                    dt.minute,
-                    dt.second + dt.microsecond / 1e6,
-                )
-                err, r, v = sat.sgp4(jd, fr)
-                if err == 0 and r:
-                    results.append(_tle_scene_object(l1[2:7].strip(), name, kind, r, v))
-            except Exception:
-                pass
-            i += 3
-        else:
-            i += 1
+    for name, l1, l2 in _iter_tle_sets(tle_text):
+        if len(results) >= limit:
+            break
+        try:
+            sat = Satrec.twoline2rv(l1, l2)
+            jd, fr = sgp4_jday(
+                dt.year,
+                dt.month,
+                dt.day,
+                dt.hour,
+                dt.minute,
+                dt.second + dt.microsecond / 1e6,
+            )
+            err, r, v = sat.sgp4(jd, fr)
+            if err == 0 and r:
+                results.append(_tle_scene_object(l1[2:7].strip(), name, kind, r, v))
+        except Exception:
+            pass
     return results
 
 
@@ -166,6 +176,38 @@ def _tle_scene_object(obj_id: str, name: str, kind: str, r, v) -> dict:
     }
 
 
+# ── Capped catalog sources ────────────────────────────────────────────────────
+# Every external catalog is capped per kind (see app.config) so one source can't
+# swamp the map. Each capped source reports what its cap left out, which the
+# admin monitor surfaces.
+class CappedObjects(NamedTuple):
+    """One catalog's scene objects plus how many its cap kept out."""
+
+    objects: list[dict]
+    hidden: int  # objects the cap excluded; 0 when nothing was dropped
+    hidden_exact: bool  # False when `hidden` is a "there are more" floor
+
+
+def _probe_cap(cap: int) -> int:
+    """Ask a query-side source for one extra record, to detect a truncated result.
+
+    JPL and SIMBAD apply the cap in the query itself, so a full page is
+    indistinguishable from an exact fit unless we ask for one more than we show.
+    """
+    return cap + 1 if cap > 0 else 0
+
+
+def _capped_by_probe(records: list, cap: int) -> tuple[list, int, bool]:
+    """Trim a probe result (`cap` + 1 records) back to the cap.
+
+    Returns the kept records plus how many were hidden: an exact 0 when the
+    source had no more to give, otherwise a floor of 1 (the probe record).
+    """
+    if len(records) > cap:
+        return records[:cap], 1, False
+    return records, 0, True
+
+
 # ── Near-Earth objects (JPL) ──────────────────────────────────────────────────
 # The CAD API gives a real approach distance and speed but no on-sky position,
 # so the radius is real (from the distance) while the angle is a deterministic
@@ -175,7 +217,7 @@ def _stable_angle(seed: str) -> float:
     return (sum(ord(char) for char in seed) % 360) * pi / 180.0
 
 
-def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
+def _jpl_scene_objects(date_str: str, cap: int) -> CappedObjects:
     """Near-Earth approaches (JPL CAD) as scene objects for the user's date.
 
     The approach *distance* is real and sets the object's radius on the shared
@@ -184,9 +226,10 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
     from app.data_parser import fetch_jpl
 
     try:
-        records = fetch_jpl(date_str, limit)
+        records = fetch_jpl(date_str, _probe_cap(cap))
     except Exception:
-        return []
+        return CappedObjects([], 0, True)
+    records, hidden, hidden_exact = _capped_by_probe(records, cap)
 
     objects: list[dict] = []
     for record in records:
@@ -214,44 +257,45 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
                 "source": "jpl",
             }
         )
-    return objects
+    return CappedObjects(objects, hidden, hidden_exact)
 
 
-# Deep-space catalogs pulled into every scene (SIMBAD): (slug, kind, limit).
-_DEEP_SPACE_SOURCES = [
-    ("galaxy", "galaxy", 6),
-    ("nebula", "nebula", 4),
-    ("star", "star", 6),
-    ("black_hole", "black_hole", 2),
-    ("quasar", "quasar", 3),
-    ("pulsar", "pulsar", 2),
-    ("supernova_remnant", "supernova_remnant", 2),
+# Deep-space kinds pulled into every scene from SIMBAD (the kind is also the
+# catalog slug). Orbital (TLE) kinds pulled from CelesTrak. Caps: app.config.
+_DEEP_SPACE_KINDS = [
+    "galaxy",
+    "nebula",
+    "star",
+    "black_hole",
+    "quasar",
+    "pulsar",
+    "supernova_remnant",
 ]
-
-# Orbital (TLE) catalogs pulled into every scene from CelesTrak: (slug, kind, limit).
-# Satellites use the caller's `limit`; the rest are fixed supporting counts.
-_TLE_SCENE_SOURCES = [
-    ("space_debris", "space_debris", 10),
-    ("rocket_body", "rocket_body", 10),
-]
+_TLE_SCENE_KINDS = ["iss", "satellite", "space_debris", "rocket_body"]
+# Every kind a scene caps, in fetch order (JPL's near-Earth leg sits between).
+_CAPPED_SCENE_KINDS = [*_TLE_SCENE_KINDS, "near_earth_object", *_DEEP_SPACE_KINDS]
 
 
-def _celestrak_scene_objects(
-    slug: str, kind: str, dt: datetime, limit: int
-) -> list[dict]:
-    """Fetch a CelesTrak group's TLEs (disk-cached) and propagate them to `dt`."""
-    if limit <= 0:
-        return []
+def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects:
+    """Fetch a CelesTrak group's TLEs (disk-cached) and propagate them to `dt`.
+
+    CelesTrak serves the whole group in one download, so the hidden count here
+    is exact: everything past the cap in that text.
+    """
+    if cap <= 0:
+        return CappedObjects([], 0, True)
     from app.data_parser import fetch_celestrak_text
 
     try:
-        tle_text = fetch_celestrak_text(slug)
+        tle_text = fetch_celestrak_text(kind)
     except Exception:
-        return []
-    return _propagate_tles(tle_text, dt, limit=limit, kind=kind)
+        return CappedObjects([], 0, True)
+    available = sum(1 for _ in _iter_tle_sets(tle_text))
+    objects = _propagate_tles(tle_text, dt, limit=cap, kind=kind)
+    return CappedObjects(objects, max(0, available - cap), True)
 
 
-def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
+def _simbad_scene_objects(kind: str, cap: int) -> CappedObjects:
     """SIMBAD deep-space objects placed by real sky direction.
 
     Right ascension gives the real angle on the map; the (astronomically vast)
@@ -261,9 +305,10 @@ def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
     from app.data_parser import fetch_simbad
 
     try:
-        records = fetch_simbad(slug, limit)
+        records = fetch_simbad(kind, _probe_cap(cap))
     except Exception:
-        return []
+        return CappedObjects([], 0, True)
+    records, hidden, hidden_exact = _capped_by_probe(records, cap)
 
     objects: list[dict] = []
     for record in records:
@@ -272,7 +317,7 @@ def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
             dec = float(record.get("dec"))
         except (TypeError, ValueError):
             continue
-        name = str(record.get("main_id", slug))
+        name = str(record.get("main_id", kind))
         angle = ra * pi / 180.0  # real right ascension
         radius = _DEEP_SKY_RADIUS - (abs(dec) / 90.0) * 0.06  # spread by declination
         objects.append(
@@ -288,7 +333,7 @@ def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
                 "source": "simbad",
             }
         )
-    return objects
+    return CappedObjects(objects, hidden, hidden_exact)
 
 
 # ── Solar-system bodies (real ephemeris) ──────────────────────────────────────
@@ -450,8 +495,71 @@ def _clear_scene_cache() -> None:
     _scene_cache.clear()
 
 
+def _capped_scene_objects(
+    dt: datetime, satellite_cap: int
+) -> tuple[list[dict], list[dict]]:
+    """Fetch every capped catalog for `dt`, concurrently.
+
+    Returns the scene objects plus one cap row per kind (kind, shown, cap,
+    hidden, hidden_exact) describing what each cap left out. All sources are
+    independent, so scene latency is the slowest single source, not their sum.
+    """
+    caps = {kind: config.scene_cap(kind) for kind in _CAPPED_SCENE_KINDS}
+    caps["satellite"] = satellite_cap  # the caller may override this one
+
+    date_str = dt.strftime("%Y-%m-%d")
+    fetchers: dict[str, partial] = {
+        kind: partial(_celestrak_scene_objects, kind, dt, caps[kind])
+        for kind in _TLE_SCENE_KINDS
+    }
+    fetchers["near_earth_object"] = partial(
+        _jpl_scene_objects, date_str, caps["near_earth_object"]
+    )
+    fetchers.update(
+        {
+            kind: partial(_simbad_scene_objects, kind, caps[kind])
+            for kind in _DEEP_SPACE_KINDS
+        }
+    )
+
+    kinds = list(fetchers)
+    with ThreadPoolExecutor(max_workers=len(fetchers)) as pool:
+        results = list(pool.map(lambda fetch: fetch(), fetchers.values()))
+
+    objects: list[dict] = []
+    cap_rows: list[dict] = []
+    for kind, result in zip(kinds, results):
+        objects.extend(result.objects)
+        cap_rows.append(
+            {
+                "kind": kind,
+                "shown": len(result.objects),
+                "cap": caps[kind],
+                "hidden": result.hidden,
+                "hidden_exact": result.hidden_exact,
+            }
+        )
+    return objects, cap_rows
+
+
+def _record_scene_caps(cap_rows: list[dict]) -> None:
+    """Publish the cap outcome to the admin monitor, and log the headline."""
+    from app.metrics import scene_cap_report
+
+    scene_cap_report.record(cap_rows)
+    hidden = sum(row["hidden"] for row in cap_rows)
+    if hidden:
+        detail = ", ".join(
+            f"{row['kind']} {row['shown']}/{row['shown'] + row['hidden']}"
+            f"{'' if row['hidden_exact'] else '+'}"
+            for row in cap_rows
+            if row["hidden"]
+        )
+        log.info("Scene caps hid %d object(s): %s", hidden, detail)
+
+
 @app.get("/api/scene")
-def get_scene(datetime_str: str | None = None, limit: int = 40):
+def get_scene(datetime_str: str | None = None, limit: int | None = None):
     cache_key = (datetime_str, limit)
     cached = _scene_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _SCENE_TTL_SECONDS:
@@ -468,29 +576,9 @@ def get_scene(datetime_str: str | None = None, limit: int = 40):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
 
-    objects: list[dict] = []
-
-    # All sources are independent, so fetch them concurrently — scene latency
-    # becomes the slowest single source, not the sum of all of them. Orbital
-    # (CelesTrak TLE) legs: stations + satellites + debris + rocket bodies;
-    # plus JPL near-Earth and one SIMBAD query per deep-space type.
-    date_str = dt.strftime("%Y-%m-%d")
-    tasks = [
-        partial(_celestrak_scene_objects, "iss", "iss", dt, 3),
-        partial(_celestrak_scene_objects, "satellite", "satellite", dt, limit),
-        partial(_jpl_scene_objects, date_str, 10),
-    ]
-    tasks += [
-        partial(_celestrak_scene_objects, slug, kind, dt, lim)
-        for slug, kind, lim in _TLE_SCENE_SOURCES
-    ]
-    tasks += [
-        partial(_simbad_scene_objects, slug, kind, lim)
-        for slug, kind, lim in _DEEP_SPACE_SOURCES
-    ]
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-        for result in pool.map(lambda fetch: fetch(), tasks):
-            objects.extend(result)
+    satellite_cap = limit if limit is not None else config.scene_cap("satellite")
+    objects, cap_rows = _capped_scene_objects(dt, satellite_cap)
+    _record_scene_caps(cap_rows)
 
     # Solar-system bodies at their real positions — local, no network.
     objects.append(_earth_scene_object())
@@ -519,11 +607,11 @@ def get_scene(datetime_str: str | None = None, limit: int = 40):
 
 
 @app.get("/api/objects/{object_slug}")
-def get_objects(object_slug: str, date: str | None = None, limit: int = 20):
+def get_objects(object_slug: str, date: str | None = None, limit: int | None = None):
     from app.data_parser import get_data
 
     try:
-        results = get_data(object_slug, date=date, limit=limit)
+        results = get_data(object_slug, date=date, limit=limit or config.object_limit())
     except ValueError as exc:
         # Unknown slug — a client error, not an upstream failure.
         raise HTTPException(status_code=404, detail=str(exc))
@@ -842,9 +930,10 @@ def _probe_sources() -> dict:
 
 @app.get("/api/admin/health")
 def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admin)):
-    from app.metrics import metrics
+    from app.metrics import metrics, scene_cap_report
 
     data = metrics.snapshot()
+    data["scene_caps"] = scene_cap_report.snapshot()
     if check_sources:
         data["sources"] = _probe_sources()
     return data

@@ -1,7 +1,8 @@
 /*
  * Admin API-health monitor. Polls /api/admin/health (admin-only) and renders
- * uptime, request volume, status breakdown, error rate, recent errors, and —
- * on demand — a live reachability probe of the external data sources.
+ * uptime, request volume, status breakdown, error rate, recent errors, the last
+ * scene's object caps, and — on demand — a live reachability probe of the
+ * external data sources.
  */
 (() => {
   const TOKEN_KEY = "cf_token";
@@ -48,6 +49,27 @@
     return card("Overview", rows);
   }
 
+  // Hidden counts from SIMBAD/JPL are a "there are more" floor (the API applies
+  // the cap in the query), so they render as "1+" rather than an exact total.
+  function fmtHidden(n, exact) {
+    return n.toLocaleString() + (exact ? "" : "+");
+  }
+
+  function renderCaps(d) {
+    const caps = d.scene_caps || {};
+    const kinds = caps.kinds || [];
+    if (!kinds.length) {
+      return card("Scene object caps", '<p class="profile-empty">No scene built yet.</p>');
+    }
+    const rows = kinds.map((k) =>
+      field(k.kind, `${k.shown} shown · ${fmtHidden(k.hidden, k.hidden_exact)} hidden · cap ${k.cap}`)
+    ).join("");
+    const total =
+      field("Total shown", caps.total_shown) +
+      field("Total hidden by caps", fmtHidden(caps.total_hidden, caps.total_hidden_exact));
+    return card("Scene object caps", total + rows);
+  }
+
   function renderPaths(d) {
     const items = (d.top_paths || []);
     if (!items.length) return card("Busiest paths", '<p class="profile-empty">No traffic yet.</p>');
@@ -90,7 +112,8 @@
     if (!res.ok) return;
     const d = await res.json();
     body.innerHTML =
-      renderOverview(d) + renderSources(d) + renderPaths(d) + renderErrors(d);
+      renderOverview(d) + renderCaps(d) + renderSources(d) +
+      renderPaths(d) + renderErrors(d);
     const chk = document.getElementById("chk-sources");
     if (chk) chk.addEventListener("change", () => { checkSources = chk.checked; refresh(); });
   }

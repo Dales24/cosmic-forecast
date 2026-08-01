@@ -400,6 +400,147 @@ def test_scene_is_cached_within_ttl():
     assert calls["jpl"] == 1  # second request hit the cache, not the network
 
 
+# ── Scene object caps ─────────────────────────────────────────────────────────
+# Caps live in app.config; every scene reports what they left out to the admin
+# monitor (app.metrics.scene_cap_report).
+
+
+def _cap_row(kind):
+    from app.metrics import scene_cap_report
+
+    rows = {row["kind"]: row for row in scene_cap_report.snapshot()["kinds"]}
+    return rows[kind]
+
+
+def test_scene_reports_exact_hidden_count_for_tle_cap(monkeypatch):
+    """CelesTrak sends the whole group, so the hidden count is a real total."""
+    monkeypatch.setenv("COSMIC_CAP_ISS", "1")
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=_ISS_TLE * 3),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    assert r.status_code == 200
+    assert len([o for o in r.json()["objects"] if o["kind"] == "iss"]) == 1
+    row = _cap_row("iss")
+    assert row == {
+        "kind": "iss",
+        "shown": 1,
+        "cap": 1,
+        "hidden": 2,
+        "hidden_exact": True,
+    }
+
+
+def test_scene_reports_nothing_hidden_when_under_the_cap(monkeypatch):
+    monkeypatch.setenv("COSMIC_CAP_ISS", "5")
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", return_value=_ISS_TLE)
+    ):
+        client.get("/api/scene")
+
+    row = _cap_row("iss")
+    assert row["hidden"] == 0 and row["hidden_exact"] is True
+
+
+def test_scene_probes_one_past_the_cap_on_query_side_sources(monkeypatch):
+    """SIMBAD/JPL cap in the query, so ask for cap+1 to detect a truncated page."""
+    monkeypatch.setenv("COSMIC_CAP_GALAXY", "2")
+    requested = {}
+
+    def fake_simbad(slug, limit):
+        requested[slug] = limit
+        return [{"main_id": f"G{i}", "ra": float(i), "dec": 0.0} for i in range(limit)]
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", side_effect=fake_simbad),
+    ):
+        r = client.get("/api/scene")
+
+    assert requested["galaxy"] == 3  # cap + 1
+    # Only the cap reaches the scene; the probe record is reported as hidden.
+    assert len([o for o in r.json()["objects"] if o["kind"] == "galaxy"]) == 2
+    row = _cap_row("galaxy")
+    assert row["shown"] == 2
+    assert row["hidden"] == 1 and row["hidden_exact"] is False  # "at least one more"
+
+
+def test_scene_reports_hidden_near_earth_objects(monkeypatch):
+    monkeypatch.setenv("COSMIC_CAP_NEAR_EARTH_OBJECT", "1")
+
+    def fake_jpl(date, limit):
+        return [{"des": f"2024 X{i}", "dist": "0.05"} for i in range(limit)]
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x")),
+        patch("app.data_parser.fetch_jpl", side_effect=fake_jpl),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    assert (
+        len([o for o in r.json()["objects"] if o["kind"] == "near_earth_object"]) == 1
+    )
+    row = _cap_row("near_earth_object")
+    assert row["hidden"] == 1 and row["hidden_exact"] is False
+
+
+def test_zero_cap_drops_a_kind_without_fetching_it(monkeypatch):
+    monkeypatch.setenv("COSMIC_CAP_SPACE_DEBRIS", "0")
+    fetched = []
+
+    def fake_celestrak(slug):
+        fetched.append(slug)
+        return _ISS_TLE
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=fake_celestrak),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    assert "space_debris" not in fetched  # capped at 0 -> no network call
+    assert not [o for o in r.json()["objects"] if o["kind"] == "space_debris"]
+    assert _cap_row("space_debris") == {
+        "kind": "space_debris",
+        "shown": 0,
+        "cap": 0,
+        "hidden": 0,
+        "hidden_exact": True,
+    }
+
+
+def test_scene_limit_param_overrides_the_satellite_cap(monkeypatch):
+    monkeypatch.setenv("COSMIC_CAP_SATELLITE", "40")
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", return_value=_ISS_TLE * 3)
+    ):
+        r = client.get("/api/scene?limit=2")
+
+    assert len([o for o in r.json()["objects"] if o["kind"] == "satellite"]) == 2
+    assert _cap_row("satellite")["cap"] == 2
+
+
+def test_scene_caps_report_survives_offline_catalogs():
+    """Every capped kind is still reported when its source is unreachable."""
+    from app.api import _CAPPED_SCENE_KINDS
+    from app.metrics import scene_cap_report
+
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        client.get("/api/scene")
+
+    snap = scene_cap_report.snapshot()
+    assert {row["kind"] for row in snap["kinds"]} == set(_CAPPED_SCENE_KINDS)
+    assert snap["total_hidden"] == 0  # nothing fetched, so nothing was capped out
+
+
 # ── Catalog scene-object helpers ──────────────────────────────────────────────
 
 
@@ -413,7 +554,7 @@ def test_jpl_scene_objects_placement_and_schema():
         "app.data_parser.fetch_jpl",
         return_value=[{"des": "2024 XY1", "dist": "0.05"}],
     ):
-        objs = _jpl_scene_objects("2025-06-01", limit=5)
+        objs = _jpl_scene_objects("2025-06-01", cap=5).objects
     assert len(objs) == 1
     obj = objs[0]
     assert obj["kind"] == "near_earth_object"
@@ -427,13 +568,13 @@ def test_jpl_scene_objects_tolerates_missing_dist():
     with patch(
         "app.data_parser.fetch_jpl", return_value=[{"des": "BadRow", "dist": None}]
     ):
-        objs = _jpl_scene_objects("2025-06-01", limit=5)
+        objs = _jpl_scene_objects("2025-06-01", cap=5).objects
     assert len(objs) == 1  # missing dist falls back to radius floor, no crash
 
 
 def test_jpl_scene_objects_empty_on_failure():
     with patch("app.data_parser.fetch_jpl", side_effect=Exception("boom")):
-        assert _jpl_scene_objects("2025-06-01", limit=5) == []
+        assert _jpl_scene_objects("2025-06-01", cap=5).objects == []
 
 
 def test_simbad_scene_objects_maps_radec_to_canvas():
@@ -441,7 +582,7 @@ def test_simbad_scene_objects_maps_radec_to_canvas():
         "app.data_parser.fetch_simbad",
         return_value=[{"main_id": "M31", "ra": 180.0, "dec": 0.0}],
     ):
-        objs = _simbad_scene_objects("galaxy", "galaxy", limit=4)
+        objs = _simbad_scene_objects("galaxy", cap=4).objects
     assert len(objs) == 1
     obj = objs[0]
     assert obj["kind"] == "galaxy"
@@ -457,7 +598,7 @@ def test_simbad_scene_objects_skips_rows_without_coords():
         "app.data_parser.fetch_simbad",
         return_value=[{"main_id": "NoCoords", "ra": None, "dec": None}],
     ):
-        assert _simbad_scene_objects("galaxy", "galaxy", limit=4) == []
+        assert _simbad_scene_objects("galaxy", cap=4).objects == []
 
 
 def test_planet_scene_objects_schema_and_placement():

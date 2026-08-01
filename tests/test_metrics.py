@@ -1,6 +1,6 @@
 """Tests for app/metrics.py — the in-memory API health collector."""
 
-from app.metrics import Metrics
+from app.metrics import Metrics, SceneCapReport
 
 
 def test_records_totals_and_status_classes():
@@ -49,3 +49,61 @@ def test_reset_clears_counters():
     m.record("GET", "/x", 200, 1.0)
     m.reset()
     assert m.snapshot()["total_requests"] == 0
+
+
+# ── SceneCapReport ────────────────────────────────────────────────────────────
+
+
+def _row(kind, shown, cap, hidden, exact=True):
+    return {
+        "kind": kind,
+        "shown": shown,
+        "cap": cap,
+        "hidden": hidden,
+        "hidden_exact": exact,
+    }
+
+
+def test_scene_cap_report_is_empty_before_any_scene():
+    snap = SceneCapReport().snapshot()
+    assert snap["at"] is None
+    assert snap["kinds"] == []
+    assert snap["total_hidden"] == 0
+
+
+def test_scene_cap_report_totals_and_ordering():
+    report = SceneCapReport()
+    report.record([_row("iss", 3, 3, 5), _row("satellite", 40, 40, 11000)])
+    snap = report.snapshot()
+    assert snap["total_shown"] == 43
+    assert snap["total_hidden"] == 11005
+    assert snap["kinds"][0]["kind"] == "satellite"  # biggest hidden count first
+    assert snap["at"] is not None
+
+
+def test_scene_cap_report_flags_inexact_hidden_counts():
+    report = SceneCapReport()
+    report.record([_row("iss", 3, 3, 5), _row("galaxy", 6, 6, 1, exact=False)])
+    assert report.snapshot()["total_hidden_exact"] is False
+
+
+def test_scene_cap_report_keeps_only_the_latest_scene():
+    report = SceneCapReport()
+    report.record([_row("iss", 3, 3, 5)])
+    report.record([_row("galaxy", 6, 6, 2)])
+    snap = report.snapshot()
+    assert [row["kind"] for row in snap["kinds"]] == ["galaxy"]
+
+
+def test_scene_cap_report_snapshot_does_not_expose_internals():
+    report = SceneCapReport()
+    report.record([_row("iss", 3, 3, 5)])
+    report.snapshot()["kinds"][0]["hidden"] = 999
+    assert report.snapshot()["kinds"][0]["hidden"] == 5
+
+
+def test_scene_cap_report_reset_clears_rows():
+    report = SceneCapReport()
+    report.record([_row("iss", 3, 3, 5)])
+    report.reset()
+    assert report.snapshot()["kinds"] == []

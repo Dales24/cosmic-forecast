@@ -2,7 +2,9 @@
 
 A single process-wide collector records every request (via middleware in
 ``api.py``) so admins can see uptime, request volume, status breakdown, error
-rate, and the most recent server errors — no external dependencies.
+rate, and the most recent server errors — no external dependencies. A second
+collector records the last scene build's per-kind object caps, so admins can see
+how much of each catalog the caps are holding back.
 """
 
 from __future__ import annotations
@@ -72,4 +74,43 @@ class Metrics:
             self.recent_errors.clear()
 
 
+class SceneCapReport:
+    """Thread-safe record of the last scene build's per-kind cap outcome.
+
+    Only the latest build is kept: the caps are a property of the scene, not a
+    running total, so "what did the last scene leave out?" is the useful answer.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._rows: list[dict] = []
+        self._at: str | None = None
+
+    def record(self, rows: list[dict]) -> None:
+        """Replace the report with one row per capped kind (see api._scene_sources)."""
+        with self._lock:
+            self._rows = sorted(rows, key=lambda row: -row["hidden"])
+            self._at = datetime.now(timezone.utc).isoformat()
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            rows = [dict(row) for row in self._rows]
+            at = self._at
+        return {
+            "at": at,
+            "total_shown": sum(row["shown"] for row in rows),
+            "total_hidden": sum(row["hidden"] for row in rows),
+            # False when any row's hidden count is a "there are more" floor
+            # rather than a true count (see api._simbad_scene_objects).
+            "total_hidden_exact": all(row["hidden_exact"] for row in rows),
+            "kinds": rows,
+        }
+
+    def reset(self) -> None:
+        with self._lock:
+            self._rows = []
+            self._at = None
+
+
 metrics = Metrics()
+scene_cap_report = SceneCapReport()
