@@ -327,6 +327,9 @@ async function loadScene(datetimeISO, search) {
     if (!error) error = err.message;
   }
   objPositions = sceneObjects.map(() => ({ x: 0, y: 0 }));
+  // Object indices change with the new scene, so in-flight bursts and the
+  // per-pair collision cooldown no longer refer to anything real.
+  clearExplosions();
   // clear stale caches
   for (const k in classCache) delete classCache[k];
   hoveredIdx  = -1;
@@ -427,6 +430,8 @@ function _staticItem(cls, text) {
 const THEMES = {
   default: {
     label: "Default",
+    motif: null, // animated ornament drawn on moving objects
+    explosionColor: "#ff8a3d",
     objectTint: null, // objects keep their natural per-kind colours
     stars: ["#ffffff", "#dbe6ff", "#cfe0ff", "#ffe6c0", "#ffcda0"],
     grad: ["#0b1230", "#050817", "#010208"],
@@ -439,6 +444,8 @@ const THEMES = {
   },
   cosmic: {
     label: "Purple Cosmic",
+    motif: "sparks", // animated ornament drawn on moving objects
+    explosionColor: "#d38bff",
     objectTint: { color: "#b794f6", amount: 0.15 },
     stars: ["#ffffff", "#e8d9ff", "#d6bcff", "#c9a2ff", "#ffcdf2"],
     grad: ["#1c1046", "#0d0622", "#04010e"],
@@ -451,6 +458,8 @@ const THEMES = {
   },
   vangogh: {
     label: "Van Gogh",
+    motif: "swirl", // animated ornament drawn on moving objects
+    explosionColor: "#f4c430",
     objectTint: { color: "#f4c430", amount: 0.32 },
     stars: ["#ffe9a8", "#ffd76b", "#fff3cf", "#bcd4ff", "#8fb8f0"],
     grad: ["#13457f", "#0d2a58", "#07162f"],
@@ -463,6 +472,8 @@ const THEMES = {
   },
   burton: {
     label: "Tim Burton",
+    motif: "bats", // animated ornament drawn on moving objects
+    explosionColor: "#9ae66e",
     objectTint: { color: "#b8a9d9", amount: 0.42 },
     stars: ["#eae7d6", "#c7f0a0", "#ffffff", "#b8a9d9", "#9ae66e"],
     grad: ["#16151d", "#0b0a11", "#030305"],
@@ -475,6 +486,8 @@ const THEMES = {
   },
   pirate: {
     label: "Pirate",
+    motif: "wheel", // animated ornament drawn on moving objects
+    explosionColor: "#ff6b2b",
     objectTint: { color: "#d9a441", amount: 0.42 },
     stars: ["#fff4d0", "#f5d98a", "#ffe9a8", "#d9b36a", "#bfa878"],
     grad: ["#2a1d0c", "#150d04", "#070401"],
@@ -1037,6 +1050,88 @@ function _drawTrail(trail, color) {
 }
 
 // Draw one object as a glyph that reads as its kind, not a flat dot.
+// ── Theme motifs ──────────────────────────────────────────────────────────────
+// Each theme can decorate moving objects with a small animated ornament, so the
+// chosen look reads on the objects themselves and not just the backdrop. Only
+// the objects that actually move are decorated — ornamenting all ~109 would
+// clutter the deep sky and hide the real data.
+const MOTIF_KINDS = new Set([
+  "satellite", "iss", "space_debris", "rocket_body", "ufo",
+]);
+
+const THEME_MOTIFS = {
+  // Two sparks orbiting the object.
+  sparks(x, y, s, phase, color) {
+    _additive(() => {
+      for (const offset of [0, Math.PI]) {
+        const a = phase * 2 + offset;
+        _core(x + Math.cos(a) * s * 2.4, y + Math.sin(a) * s * 2.4, s * 0.4, color);
+      }
+    });
+  },
+
+  // A rotating brush-stroke arc, echoing Starry Night's swirls.
+  swirl(x, y, s, phase, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(phase * 1.5);
+    _additive(() => {
+      ctx.strokeStyle = hexA(color, 0.7);
+      ctx.lineWidth = Math.max(1, s * 0.35);
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 2.2, 0, Math.PI * 1.4);
+      ctx.stroke();
+    });
+    ctx.restore();
+  },
+
+  // Flapping bat wings — two arcs whose span pulses.
+  bats(x, y, s, phase, color) {
+    const flap = 0.6 + 0.4 * Math.sin(phase * 6);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = hexA(color, 0.8);
+    ctx.lineWidth = Math.max(1, s * 0.3);
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(dir * s * 1.6, -s * 1.6 * flap, dir * s * 2.8, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+
+  // A turning ship's wheel: rim plus spokes that overhang it as handles.
+  wheel(x, y, s, phase, color) {
+    const r = s * 1.9;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(phase * 1.2);
+    ctx.strokeStyle = hexA(color, 0.85);
+    ctx.lineWidth = Math.max(1, s * 0.28);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    for (let spoke = 0; spoke < 6; spoke++) {
+      const a = (spoke / 6) * Math.PI * 2;
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * r * 1.45, Math.sin(a) * r * 1.45);
+    }
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+// Draw the active theme's ornament on one object, if it has one.
+function drawThemeMotif(kind, x, y, size, phase, color) {
+  if (!MOTIF_KINDS.has(kind)) return false;
+  const motif = THEME_MOTIFS[currentTheme.motif];
+  if (!motif) return false;
+  motif(x, y, size, phase, color);
+  return true;
+}
+
 function drawGlyph(kind, x, y, style, phase, sunX, sunY) {
   const c = style.color;
   const s = style.size;
@@ -1131,6 +1226,120 @@ function drawGlyph(kind, x, y, style, phase, sunX, sunY) {
   }
 }
 
+// ── Collisions and explosions ─────────────────────────────────────────────────
+// Only objects with real velocity can collide — the satellites, debris and
+// rocket bodies that the simulation actually moves. Static catalogue entries
+// (deep sky, planets, Earth) are drawn at a fixed spot, so a "collision"
+// between them would be an artifact of the projection, not an event.
+const COLLISION_DIST_SCENE = 0.006; // scene units, so it is zoom-independent
+const COLLISION_COOLDOWN_MS = 4000; // per pair, so contact doesn't spam bursts
+const EXPLOSION_LIFETIME_MS = 900;
+const MAX_EXPLOSIONS = 12;
+
+let explosions = [];
+let lastCollisionAt = {};        // "i:j" -> timestamp of that pair's last burst
+let separatedPairs = new Set();  // pair keys currently known to be apart
+
+function isCollidable(obj) {
+  return Boolean(obj && (obj.vx_norm || obj.vy_norm));
+}
+
+// Pairs of collidable objects that have just come together.
+//
+// Proximity alone is the wrong test: plenty of real objects are permanently
+// co-located on this map — ISS modules docked to the same station, Starlink
+// satellites flying in formation — and on a log-radius projection they sit on
+// top of each other from the first frame. Those never *approach*; they arrive
+// together. So a pair only counts once it has been seen apart, and must
+// separate again before it can count a second time.
+//
+// `separated` is the set of pair keys currently known to be apart; this reads
+// and updates it. Positions are canvas units at zoom 1, so the threshold is
+// zoom-independent.
+function findApproaches(objects, positions, threshold, separated) {
+  const events = [];
+  for (let i = 0; i < objects.length; i++) {
+    if (!isCollidable(objects[i]) || !positions[i]) continue;
+    for (let j = i + 1; j < objects.length; j++) {
+      if (!isCollidable(objects[j]) || !positions[j]) continue;
+      const key = i + ":" + j;
+      const dx = positions[i].x - positions[j].x;
+      const dy = positions[i].y - positions[j].y;
+
+      if (Math.hypot(dx, dy) > threshold) {
+        separated.add(key);
+        continue;
+      }
+      if (!separated.has(key)) continue; // together since we started watching
+      separated.delete(key);             // must drift apart before firing again
+      events.push({
+        i, j,
+        x: (positions[i].x + positions[j].x) / 2,
+        y: (positions[i].y + positions[j].y) / 2,
+      });
+    }
+  }
+  return events;
+}
+
+// Turn collisions into bursts, ignoring any pair that just exploded.
+function spawnExplosions(hits, now, color) {
+  for (const hit of hits) {
+    if (explosions.length >= MAX_EXPLOSIONS) break;
+    const key = hit.i + ":" + hit.j;
+    if (now - (lastCollisionAt[key] || -Infinity) < COLLISION_COOLDOWN_MS) continue;
+    lastCollisionAt[key] = now;
+    explosions.push({
+      x: hit.x,
+      y: hit.y,
+      born: now,
+      color,
+      // Fixed spread per burst so a replay of the same frame looks the same.
+      shards: Array.from({ length: 10 }, (_, n) => {
+        const a = (n / 10) * Math.PI * 2;
+        return { dx: Math.cos(a), dy: Math.sin(a), len: 0.6 + (n % 3) * 0.25 };
+      }),
+    });
+  }
+}
+
+function drawExplosions(now, scale) {
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const burst = explosions[i];
+    const age = (now - burst.born) / EXPLOSION_LIFETIME_MS;
+    if (age >= 1) { explosions.splice(i, 1); continue; }
+
+    const fade = 1 - age;
+    const radius = scale * 0.012 * (0.3 + age * 2.2);
+    _additive(() => {
+      _bloom(burst.x, burst.y, radius * 2.2, burst.color, 0.5 * fade);
+      _bloom(burst.x, burst.y, radius, "#fff3c4", 0.7 * fade);
+
+      ctx.strokeStyle = hexA(burst.color, 0.8 * fade);
+      ctx.lineWidth = Math.max(1, scale * 0.002 * fade);
+      ctx.beginPath();
+      for (const shard of burst.shards) {
+        const inner = radius * 0.6, outer = radius * (1.1 + shard.len);
+        ctx.moveTo(burst.x + shard.dx * inner, burst.y + shard.dy * inner);
+        ctx.lineTo(burst.x + shard.dx * outer, burst.y + shard.dy * outer);
+      }
+      ctx.stroke();
+
+      ctx.strokeStyle = hexA("#ffffff", 0.5 * fade);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(burst.x, burst.y, radius * 1.6, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+  }
+}
+
+function clearExplosions() {
+  explosions = [];
+  lastCollisionAt = {};
+  separatedPairs = new Set();
+}
+
 function drawSceneObjects(cx, cy, scale, realTime) {
   // How far has simulation advanced (in real seconds of object physics)?
   const simElapsedS = (simMode && !simPaused)
@@ -1187,8 +1396,18 @@ function drawSceneObjects(cx, cy, scale, realTime) {
     } else if (!isBody) {
       // Sun/Earth/Moon are painted by their own draw functions in frame().
       drawGlyph(obj.kind, wx, wy, style, phase, sunX, sunY);
+      drawThemeMotif(obj.kind, wx, wy, style.size, phase, style.color);
     }
   }
+
+  // Collisions are a property of the running simulation, not of a frozen scene.
+  if (moving) {
+    const approaches = findApproaches(
+      sceneObjects, objPositions, COLLISION_DIST_SCENE * scale, separatedPairs
+    );
+    spawnExplosions(approaches, realTime, currentTheme.explosionColor);
+  }
+  drawExplosions(realTime, scale);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
@@ -1749,6 +1968,9 @@ if (typeof module !== "undefined") {
     THEMES, DEFAULT_THEME,
     // Stateless pure functions
     esc, sceneResultHTML, focusOnObjects, resetView, validationDetail, pauseSimulationAt,
+    MOTIF_KINDS, THEME_MOTIFS, drawThemeMotif,
+    isCollidable, findApproaches, spawnExplosions, drawExplosions, clearExplosions,
+    COLLISION_DIST_SCENE, COLLISION_COOLDOWN_MS, EXPLOSION_LIFETIME_MS, MAX_EXPLOSIONS,
     effectiveTime,
     findObjectAt,
     setTheme, kindStyle, mixHex, DISTANCE_BANDS, customObjectXY, addToScene,
@@ -1786,5 +2008,8 @@ if (typeof module !== "undefined") {
     get forecastPaths() { return forecastPaths; },
     set forecastPaths(v){ forecastPaths = v; },
     get currentTheme()  { return currentTheme; },
+    set currentTheme(v) { currentTheme = v; },
+    get explosions()    { return explosions; },
+    get separatedPairs(){ return separatedPairs; },
   };
 }

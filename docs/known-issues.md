@@ -87,6 +87,26 @@ real great-circle separation against each object's `ra_deg`/`dec_deg`.
 - **Declinations for solar-system bodies come from the same approximate
   ephemeris as their RA** — good to roughly arc-minutes, not survey-grade.
 
+## Scene effects (motifs and collisions)
+
+- **Explosions are not conjunction analysis.** A burst fires when two moving
+  objects come within `COLLISION_DIST_SCENE` (0.006 scene units) *on the map*.
+  The map's radius is a **log** of geocentric distance, so two objects that look
+  adjacent can be hundreds of km apart in reality. Treat these as a visual
+  flourish showing near-passes at map resolution — not a collision prediction,
+  and not something to act on.
+- **Only an *approach* counts, never mere proximity.** Plenty of real objects
+  are permanently co-located on this projection — ISS modules docked to the same
+  station, Starlink satellites in formation. A pair must be seen apart before it
+  can fire, and must separate again before firing twice (plus a
+  `COLLISION_COOLDOWN_MS` guard). Without this, roughly 60 pairs "collided" on
+  every single frame from the moment the simulation started.
+- **Collisions are cosmetic — nothing is destroyed.** Objects pass through each
+  other and keep their trajectories; the burst is drawn over the top.
+- **Motifs decorate moving objects only** (`MOTIF_KINDS`: satellites, ISS,
+  debris, rocket bodies, UFO). Ornamenting all ~109 objects would bury the deep
+  sky. The default theme has no motif by design.
+
 ## Caching and freshness
 
 Three independent layers, each keyed on what actually changes:
