@@ -107,3 +107,56 @@ def test_scene_cap_report_reset_clears_rows():
     report.record([_row("iss", 3, 3, 5)])
     report.reset()
     assert report.snapshot()["kinds"] == []
+
+
+# ── SourceFailureLog ──────────────────────────────────────────────────────────
+
+
+def test_source_failures_start_empty():
+    from app.metrics import SourceFailureLog
+
+    assert SourceFailureLog().snapshot() == {"total": 0, "sources": []}
+
+
+def test_source_failure_records_source_kind_and_error():
+    from app.metrics import SourceFailureLog
+
+    log = SourceFailureLog()
+    log.record("simbad", "galaxy", "timeout")
+    row = log.snapshot()["sources"][0]
+    assert row["source"] == "simbad"
+    assert row["kind"] == "galaxy"
+    assert row["error"] == "timeout"
+    assert row["count"] == 1
+
+
+def test_repeated_failures_count_up_rather_than_pile_up():
+    """A source that is down stays one row with a rising count."""
+    from app.metrics import SourceFailureLog
+
+    log = SourceFailureLog()
+    for _ in range(3):
+        log.record("celestrak", "satellite", "403")
+    snapshot = log.snapshot()
+    assert len(snapshot["sources"]) == 1
+    assert snapshot["sources"][0]["count"] == 3
+    assert snapshot["total"] == 3
+
+
+def test_different_kinds_are_tracked_separately():
+    from app.metrics import SourceFailureLog
+
+    log = SourceFailureLog()
+    log.record("simbad", "galaxy", "timeout")
+    log.record("simbad", "pulsar", "timeout")
+    assert len(log.snapshot()["sources"]) == 2
+    assert log.snapshot()["total"] == 2
+
+
+def test_source_failure_reset_clears_everything():
+    from app.metrics import SourceFailureLog
+
+    log = SourceFailureLog()
+    log.record("jpl", "near_earth_object", "boom")
+    log.reset()
+    assert log.snapshot()["total"] == 0

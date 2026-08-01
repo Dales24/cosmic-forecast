@@ -5,7 +5,7 @@
  * external data sources.
  */
 (() => {
-  const TOKEN_KEY = "cf_token";
+  const TOKEN_KEY = window.COSMIC.TOKEN_KEY;
   const token = localStorage.getItem(TOKEN_KEY);
   const body = document.getElementById("admin-body");
   let checkSources = false;
@@ -70,6 +70,21 @@
     return card("Scene object caps", total + rows);
   }
 
+  // Scene assembly hides source outages from users so the map keeps working;
+  // this is where an admin can tell an outage from a genuinely sparse sky.
+  function renderSourceFailures(d) {
+    const failures = d.source_failures || {};
+    const rows = failures.sources || [];
+    if (!rows.length) {
+      return card("Source failures", '<p class="profile-empty">None 🎉</p>');
+    }
+    const items = rows.map((f) =>
+      `<div class="profile-list-item">🔴 ${esc(f.source)} · ${esc(f.kind)} ` +
+      `<span class="meta">${esc(f.count)}&times; · ${esc(f.error)} · ${esc(f.at)}</span></div>`
+    ).join("");
+    return card(`Source failures (${failures.total})`, items);
+  }
+
   function renderPaths(d) {
     const items = (d.top_paths || []);
     if (!items.length) return card("Busiest paths", '<p class="profile-empty">No traffic yet.</p>');
@@ -113,7 +128,7 @@
     const d = await res.json();
     body.innerHTML =
       renderOverview(d) + renderCaps(d) + renderSources(d) +
-      renderPaths(d) + renderErrors(d);
+      renderSourceFailures(d) + renderPaths(d) + renderErrors(d);
     const chk = document.getElementById("chk-sources");
     if (chk) chk.addEventListener("change", () => { checkSources = chk.checked; refresh(); });
   }

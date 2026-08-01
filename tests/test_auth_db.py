@@ -313,3 +313,65 @@ def test_password_hash_roundtrip():
     # A fresh call uses a new random salt.
     digest2, salt2 = auth.hash_password("hunter2secret")
     assert salt2 != salt
+
+
+def test_admin_health_reports_source_failures(client, monkeypatch):
+    """Source outages are hidden from users, so admins must be able to see them."""
+    from app.metrics import source_failures
+
+    monkeypatch.setenv("COSMIC_ADMIN_USERS", "chief")
+    headers = _auth(client, "chief")
+    source_failures.record("simbad", "galaxy", "timeout")
+    try:
+        data = client.get("/api/admin/health", headers=headers).json()
+    finally:
+        source_failures.reset()
+
+    assert data["source_failures"]["total"] == 1
+    assert data["source_failures"]["sources"][0]["source"] == "simbad"
+    assert data["source_failures"]["sources"][0]["kind"] == "galaxy"
+
+
+def test_per_user_lookups_use_an_index(tmp_path, monkeypatch):
+    """Without an index every per-user query full-scans the table."""
+    monkeypatch.setenv("COSMIC_DB_PATH", str(tmp_path / "idx.db"))
+    from app import db
+
+    db._initialized.clear()
+    conn = db.get_conn()
+    try:
+        for table in ("saved_searches", "saved_uploads", "custom_objects", "sessions"):
+            plan = " ".join(
+                row["detail"]
+                for row in conn.execute(
+                    f"EXPLAIN QUERY PLAN SELECT * FROM {table} WHERE user_id = ?", (1,)
+                )
+            )
+            assert "USING INDEX" in plan, f"{table} still scans: {plan}"
+    finally:
+        conn.close()
+        db._initialized.clear()
+
+
+def test_delete_helpers_refuse_another_users_row(tmp_path, monkeypatch):
+    """The shared ownership check is the thing protecting every owned table."""
+    monkeypatch.setenv("COSMIC_DB_PATH", str(tmp_path / "own.db"))
+    from app import db
+
+    db._initialized.clear()
+    owner = db.create_user("owner", None, "h", "s")
+    other = db.create_user("other", None, "h", "s")
+
+    search_id = db.add_search(owner, "mine", {"a": 1})
+    upload_id = db.add_upload(owner, "f.png", "galaxy", {"class": "g"})
+    object_id = db.add_custom_object(owner, "probe", "satellite", 0.1, 0.2)
+
+    assert db.delete_search(other, search_id) is False
+    assert db.delete_upload(other, upload_id) is False
+    assert db.delete_custom_object(other, object_id) is False
+
+    # ...and the owner can still delete them.
+    assert db.delete_search(owner, search_id) is True
+    assert db.delete_upload(owner, upload_id) is True
+    assert db.delete_custom_object(owner, object_id) is True
+    db._initialized.clear()

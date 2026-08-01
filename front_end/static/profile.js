@@ -4,7 +4,7 @@
  * same /api/auth and /api/searches / /api/uploads endpoints. Read-only.
  */
 (() => {
-  const TOKEN_KEY = "cf_token";
+  const TOKEN_KEY = window.COSMIC.TOKEN_KEY;
   const token = localStorage.getItem(TOKEN_KEY);
   const $ = (id) => document.getElementById(id);
 

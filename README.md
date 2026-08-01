@@ -49,6 +49,7 @@ front_end/
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/` | Frontend SPA |
+| `GET` | `/help` · `/profile` · `/admin` | Help, account, and admin-monitor pages |
 | `GET` | `/static/*` | CSS and JS assets |
 | `GET` | `/api/scene` | Assembled scene (CelesTrak TLEs + JPL + SIMBAD) for a datetime |
 | `GET` | `/api/objects/{slug}` | Live data from CelesTrak / JPL / SIMBAD |
@@ -67,9 +68,49 @@ front_end/
 | `DELETE` | `/api/searches/{id}` | Delete a saved search |
 | `GET`/`POST` | `/api/uploads` | List / save classification uploads |
 | `DELETE` | `/api/uploads/{id}` | Delete a saved upload |
+| `GET`/`POST` | `/api/custom-objects` | List / add the user's own scene objects |
+| `DELETE` | `/api/custom-objects/{id}` | Delete a custom object |
+| `PUT` | `/api/preferences` | Save UI preferences (theme) |
+| `GET` | `/api/admin/health` | Request metrics, scene caps, source failures (admin only) |
 
-Query params for `/api/objects/{slug}`: `date=YYYY-MM-DD`, `limit=20`. The DB path
-defaults to `data/cosmic.db` (override with `COSMIC_DB_PATH`).
+### Query parameters
+
+`GET /api/scene` — every parameter is optional:
+
+| Param | Default | Meaning |
+|-------|---------|---------|
+| `datetime_str` | now | ISO 8601 UTC moment to build the scene for. Rejected with 422 if unparseable. |
+| `limit` | `COSMIC_CAP_SATELLITE` | Override the satellite cap only |
+| `ra`, `dec` | — | Degrees. Give **both** to narrow the scene to a patch of sky; accepts `83.82` or `83.82°` |
+| `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
+
+A position search adds a `search` block to the response (`matched`, `searched`,
+`radius_deg`). Objects with no real sky position — JPL near-Earth objects and
+the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-issues.md).
+
+`GET /api/objects/{slug}` — `date=YYYY-MM-DD`, `limit=20`.
+
+### Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `COSMIC_DB_PATH` | `data/cosmic.db` | SQLite database file |
+| `COSMIC_TLE_CACHE_DIR` | `data/tle_cache` | Where CelesTrak TLE text is cached on disk |
+| `COSMIC_ADMIN_USERS` | *(empty)* | Comma-separated usernames granted admin on registration |
+| `COSMIC_CAP_<KIND>` | see `app/config.py` | Per-kind cap on how many objects a catalog may add to a scene (e.g. `COSMIC_CAP_GALAXY=12`) |
+
+### Caching
+
+Three layers, each keyed on what actually changes — see
+[docs/known-issues.md](docs/known-issues.md) for the freshness implications:
+
+- **Scene** (45s, max 64 entries) — whole assembled scenes by datetime/limit/search.
+- **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
+  scene datetime, so a new minute doesn't refetch static sky.
+- **TLE disk cache** (2h) — raw CelesTrak text, matching its publish cadence.
+
+External-source failures never break a scene; they are logged and surfaced at
+`/api/admin/health`.
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 

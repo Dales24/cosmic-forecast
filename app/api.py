@@ -179,6 +179,22 @@ def _tle_scene_object(obj_id: str, name: str, kind: str, r, v) -> dict:
     }
 
 
+# ── Source failure reporting ──────────────────────────────────────────────────
+def _source_unavailable(source: str, kind: str, exc: Exception) -> "CappedObjects":
+    """Log a catalog failure and return the empty result the scene falls back to.
+
+    One source failing must never crash the scene (see claude.md §3), but
+    degrading in total silence makes an outage indistinguishable from a sky with
+    nothing in it. Every fetch failure goes through here so it lands in the log
+    and in the admin health monitor.
+    """
+    from app.metrics import source_failures
+
+    log.warning("%s fetch failed for %s: %s", source, kind, exc)
+    source_failures.record(source, kind, str(exc))
+    return CappedObjects([], 0, True)
+
+
 # ── Catalog result cache ──────────────────────────────────────────────────────
 # The scene cache alone is keyed by the exact datetime, so every new minute
 # refetched all eight catalogs. Most of that work doesn't depend on the minute:
@@ -266,8 +282,8 @@ def _fetch_jpl_objects(date_str: str, cap: int) -> CappedObjects:
 
     try:
         records = fetch_jpl(date_str, _probe_cap(cap))
-    except Exception:
-        return CappedObjects([], 0, True)
+    except Exception as exc:
+        return _source_unavailable("jpl", "near_earth_object", exc)
     records, hidden, hidden_exact = _capped_by_probe(records, cap)
 
     objects: list[dict] = []
@@ -327,8 +343,8 @@ def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects
 
     try:
         tle_text = fetch_celestrak_text(kind)
-    except Exception:
-        return CappedObjects([], 0, True)
+    except Exception as exc:
+        return _source_unavailable("celestrak", kind, exc)
     available = sum(1 for _ in _iter_tle_sets(tle_text))
     objects = _propagate_tles(tle_text, dt, limit=cap, kind=kind)
     return CappedObjects(objects, max(0, available - cap), True)
@@ -353,8 +369,8 @@ def _fetch_simbad_objects(kind: str, cap: int) -> CappedObjects:
 
     try:
         records = fetch_simbad(kind, _probe_cap(cap))
-    except Exception:
-        return CappedObjects([], 0, True)
+    except Exception as exc:
+        return _source_unavailable("simbad", kind, exc)
     records, hidden, hidden_exact = _capped_by_probe(records, cap)
 
     objects: list[dict] = []
@@ -1115,10 +1131,12 @@ def _probe_sources() -> dict:
 
 @app.get("/api/admin/health")
 def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admin)):
-    from app.metrics import metrics, scene_cap_report
+    from app.metrics import metrics, scene_cap_report, source_failures
 
     data = metrics.snapshot()
     data["scene_caps"] = scene_cap_report.snapshot()
+    # Scene assembly hides source outages from users on purpose; admins see them.
+    data["source_failures"] = source_failures.snapshot()
     if check_sources:
         data["sources"] = _probe_sources()
     return data

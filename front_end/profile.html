@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Profile · Cosmic Forecast</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/config.js"></script>
 </head>
 <body class="page-mode">
   <script>
     // Apply the saved theme (shared with the map page) before content paints.
     (function () {
       var t = null;
-      try { t = localStorage.getItem("cosmicTheme"); } catch (e) { /* ignore */ }
+      try { t = localStorage.getItem(window.COSMIC.THEME_KEY); } catch (e) { /* ignore */ }
       document.body.classList.add("theme-" + (t || "default"));
     })();
   </script>

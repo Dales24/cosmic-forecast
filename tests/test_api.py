@@ -1037,3 +1037,48 @@ def test_large_static_assets_are_gzipped():
     resp = client.get("/static/app.js", headers={"accept-encoding": "gzip"})
     assert resp.status_code == 200
     assert resp.headers.get("content-encoding") == "gzip"
+
+
+# ── Source failure reporting ──────────────────────────────────────────────────
+
+
+def test_scene_records_source_failures_instead_of_hiding_them():
+    """Degrading silently makes an outage look like an empty sky (claude.md §3)."""
+    from app.metrics import source_failures
+
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("403"))
+    ):
+        r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
+
+    assert r.status_code == 200  # the scene still builds
+    snapshot = source_failures.snapshot()
+    assert snapshot["total"] > 0
+    sources = {row["source"] for row in snapshot["sources"]}
+    assert {"celestrak", "jpl", "simbad"} <= sources
+
+
+def test_source_failure_is_logged(caplog):
+    with caplog.at_level("WARNING", logger="app.api"):
+        with _offline_catalogs(
+            patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("403"))
+        ):
+            client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
+    assert any("fetch failed" in record.message for record in caplog.records)
+
+
+def test_healthy_scene_records_no_failures():
+    from app.metrics import source_failures
+
+    tle_text = (
+        "ISS (ZARYA)\n"
+        "1 25544U 98067A   24001.50000000  .00001234  00000-0  27890-4 0  9990\n"
+        "2 25544  51.6400 100.0000 0001500  50.0000 310.0000 15.50000000000014\n"
+    )
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=tle_text),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
+    assert source_failures.snapshot()["total"] == 0

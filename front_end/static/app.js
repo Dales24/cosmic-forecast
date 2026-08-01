@@ -258,7 +258,7 @@ function addToScene(obj) {
 }
 
 function _token() {
-  try { return localStorage.getItem("cf_token"); } catch { return null; }
+  try { return localStorage.getItem(window.COSMIC.TOKEN_KEY); } catch { return null; }
 }
 
 // Merge the signed-in user's saved custom objects into the scene.
@@ -1255,7 +1255,7 @@ function setTheme(name) {
   buildBackdrop(window.innerWidth, window.innerHeight);
   initStars(320);
   updateLegend(); // recolour legend swatches for the new palette
-  try { localStorage.setItem("cosmicTheme", key); } catch { /* storage disabled */ }
+  try { localStorage.setItem(window.COSMIC.THEME_KEY, key); } catch { /* storage disabled */ }
   return key;
 }
 
@@ -1312,7 +1312,7 @@ function initAddObjectForm() {
 
 resize(); // size the canvas first
 let _savedTheme = null;
-try { _savedTheme = localStorage.getItem("cosmicTheme"); } catch { /* ignore */ }
+try { _savedTheme = localStorage.getItem(window.COSMIC.THEME_KEY); } catch { /* ignore */ }
 setTheme(_savedTheme || DEFAULT_THEME); // paints the themed backdrop + star field
 initAddObjectForm();
 requestAnimationFrame(frame);
@@ -1450,6 +1450,23 @@ async function fetchForecast() {
 const playBtn   = document.getElementById("play-btn");
 const simTimeEl = document.getElementById("sim-time");
 
+// Freeze the simulation at a moment and put the controls in the paused state.
+// Four flows land here — load scene, clear search, CSV upload, page init — so
+// they share one definition instead of four copies of the same eight lines.
+// Callers that invalidate predicted paths clear `forecastPaths` themselves; the
+// CSV flow deliberately keeps the paths it just computed.
+function pauseSimulationAt(timestampMs, label) {
+  simMode      = true;
+  simPaused    = true;
+  simStartReal = performance.now();
+  simStartEff  = timestampMs;
+
+  playBtn.textContent = "▶ Play Simulation";
+  playBtn.classList.remove("playing");
+  simTimeEl.style.display = "block";
+  simTimeEl.textContent   = "Paused — " + label;
+}
+
 playBtn.addEventListener("click", async () => {
   if (forecasting) return;
 
@@ -1537,17 +1554,9 @@ document.getElementById("scene-form").addEventListener("submit", async function 
   const ts    = new Date(dtISO).getTime();
   const stamp = dtISO.slice(0, 16).replace("T", " ");
 
-  // Reset simulation to frozen at this moment
-  simMode      = true;
-  simPaused    = true;
-  simStartReal = performance.now();
-  simStartEff  = ts;
+  // A new scene invalidates any predicted paths drawn for the old one.
   forecastPaths = null;
-
-  playBtn.textContent = "▶ Play Simulation";
-  playBtn.classList.remove("playing");
-  simTimeEl.style.display = "block";
-  simTimeEl.textContent   = "Paused — " + stamp;
+  pauseSimulationAt(ts, stamp);
 
   // Every load reports back, so the button is never a no-op on screen.
   const resultEl = document.getElementById("scene-result");
@@ -1566,16 +1575,8 @@ document.getElementById("clear-search").addEventListener("click", async function
   const utcMinutes = now.toISOString().slice(0, 16);
   document.getElementById("obs_datetime").value = utcMinutes;
 
-  simMode      = true;
-  simPaused    = true;
-  simStartReal = performance.now();
-  simStartEff  = now.getTime();
   forecastPaths = null;
-
-  playBtn.textContent = "▶ Play Simulation";
-  playBtn.classList.remove("playing");
-  simTimeEl.style.display = "block";
-  simTimeEl.textContent   = "Paused — " + utcMinutes.replace("T", " ");
+  pauseSimulationAt(now.getTime(), utcMinutes.replace("T", " "));
 
   const resultEl = document.getElementById("scene-result");
   resultEl.innerHTML = '<div class="results"><p>Clearing search…</p></div>';
@@ -1714,15 +1715,8 @@ async function handleCSVUpload(file) {
     filterKind = null;
     updateLegend();
 
-    // Freeze at latest timestamp from the data
-    simMode      = true;
-    simPaused    = true;
-    simStartReal = performance.now();
-    simStartEff  = Date.now();
-    playBtn.textContent = "▶ Play Simulation";
-    playBtn.classList.remove("playing");
-    simTimeEl.style.display = "block";
-    simTimeEl.textContent   = "Paused — " + n + " objects loaded";
+    // Freeze at the latest timestamp in the data, keeping the paths just predicted.
+    pauseSimulationAt(Date.now(), `${n} objects loaded`);
 
     csvResult.className   = "csv-status success";
     csvResult.textContent = `✓ ${n} object${n === 1 ? "" : "s"} loaded, ${p} path${p === 1 ? "" : "s"} predicted. Press ▶ to simulate.`;
@@ -1740,12 +1734,7 @@ async function handleCSVUpload(file) {
   const utcMinutes = now.toISOString().slice(0, 16);
   document.getElementById("obs_datetime").value = utcMinutes;
 
-  simMode      = true;
-  simPaused    = true;
-  simStartReal = performance.now();
-  simStartEff  = now.getTime();
-  simTimeEl.style.display = "block";
-  simTimeEl.textContent   = "Paused — " + utcMinutes.replace("T", " ");
+  pauseSimulationAt(now.getTime(), utcMinutes.replace("T", " "));
 
   // Minute precision, like the form sends. A millisecond-precision stamp is a
   // unique cache key on every load, so the server's scene cache never hit.
@@ -1759,7 +1748,7 @@ if (typeof module !== "undefined") {
     KIND_STYLES, KIND_NAMES, KIND_FACTS, KIND_LINKS, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
     THEMES, DEFAULT_THEME,
     // Stateless pure functions
-    esc, sceneResultHTML, focusOnObjects, resetView, validationDetail,
+    esc, sceneResultHTML, focusOnObjects, resetView, validationDetail, pauseSimulationAt,
     effectiveTime,
     findObjectAt,
     setTheme, kindStyle, mixHex, DISTANCE_BANDS, customObjectXY, addToScene,

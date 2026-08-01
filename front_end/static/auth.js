@@ -5,7 +5,7 @@
  * /api/uploads endpoints; the session token lives in localStorage.
  */
 (() => {
-  const TOKEN_KEY = "cf_token";
+  const TOKEN_KEY = window.COSMIC.TOKEN_KEY;
   let token = localStorage.getItem(TOKEN_KEY) || null;
   let me = null;
   let lastUploadName = "";

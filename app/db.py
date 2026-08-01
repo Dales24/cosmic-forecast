@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS custom_objects (
     y_norm     REAL NOT NULL,
     created_at TEXT NOT NULL
 );
+-- Every per-user lookup filters on user_id; without these SQLite full-scans the
+-- table. (`sessions.token_hash` and `users.username` are already indexed by
+-- their PRIMARY KEY / UNIQUE constraints.)
+CREATE INDEX IF NOT EXISTS idx_sessions_user       ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_searches_user       ON saved_searches(user_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_user        ON saved_uploads(user_id);
+CREATE INDEX IF NOT EXISTS idx_custom_objects_user ON custom_objects(user_id);
 """
 
 # Which paths we've already run the schema against (schema is idempotent).
@@ -93,6 +100,48 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── Owned-row helpers ─────────────────────────────────────────────────────────
+# Saved searches, uploads and custom objects are all "rows belonging to a user"
+# and were three copies of the same insert/list/delete. Sharing them keeps the
+# `AND user_id = ?` ownership check in one place, where it can't be forgotten
+# when a fourth table is added.
+#
+# Table and column names here are module-private literals, never caller input —
+# only values are ever parameterised.
+
+
+def _insert_owned(table: str, columns: tuple[str, ...], values: tuple) -> int:
+    """Insert one row with a `created_at` stamp; returns the new row id."""
+    placeholders = ", ".join("?" for _ in range(len(columns) + 1))
+    with closing(get_conn()) as conn:
+        cur = conn.execute(
+            f"INSERT INTO {table} ({', '.join(columns)}, created_at) "
+            f"VALUES ({placeholders})",
+            (*values, _now()),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def _list_owned(table: str, user_id: int, to_dict) -> list:
+    """Every row this user owns, newest first."""
+    with closing(get_conn()) as conn:
+        rows = conn.execute(
+            f"SELECT * FROM {table} WHERE user_id = ? ORDER BY id DESC", (user_id,)
+        ).fetchall()
+    return [to_dict(row) for row in rows]
+
+
+def _delete_owned(table: str, user_id: int, row_id: int) -> bool:
+    """Delete one row only if this user owns it. False when there was no match."""
+    with closing(get_conn()) as conn:
+        cur = conn.execute(
+            f"DELETE FROM {table} WHERE id = ? AND user_id = ?", (row_id, user_id)
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ── users ─────────────────────────────────────────────────────────────────────
@@ -167,33 +216,19 @@ def delete_session(token_hash: str) -> None:
 
 # ── saved searches ────────────────────────────────────────────────────────────
 def add_search(user_id: int, name: str, params: dict) -> int:
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "INSERT INTO saved_searches (user_id, name, params, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (user_id, name, json.dumps(params), _now()),
-        )
-        conn.commit()
-        return cur.lastrowid
+    return _insert_owned(
+        "saved_searches",
+        ("user_id", "name", "params"),
+        (user_id, name, json.dumps(params)),
+    )
 
 
 def list_searches(user_id: int) -> list:
-    with closing(get_conn()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM saved_searches WHERE user_id = ? ORDER BY id DESC",
-            (user_id,),
-        ).fetchall()
-    return [_search_dict(r) for r in rows]
+    return _list_owned("saved_searches", user_id, _search_dict)
 
 
 def delete_search(user_id: int, search_id: int) -> bool:
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "DELETE FROM saved_searches WHERE id = ? AND user_id = ?",
-            (search_id, user_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+    return _delete_owned("saved_searches", user_id, search_id)
 
 
 def _search_dict(row: sqlite3.Row) -> dict:
@@ -207,33 +242,19 @@ def _search_dict(row: sqlite3.Row) -> dict:
 
 # ── saved uploads ─────────────────────────────────────────────────────────────
 def add_upload(user_id: int, filename: str, kind: Optional[str], result: dict) -> int:
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "INSERT INTO saved_uploads (user_id, filename, kind, result, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (user_id, filename, kind, json.dumps(result), _now()),
-        )
-        conn.commit()
-        return cur.lastrowid
+    return _insert_owned(
+        "saved_uploads",
+        ("user_id", "filename", "kind", "result"),
+        (user_id, filename, kind, json.dumps(result)),
+    )
 
 
 def list_uploads(user_id: int) -> list:
-    with closing(get_conn()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM saved_uploads WHERE user_id = ? ORDER BY id DESC",
-            (user_id,),
-        ).fetchall()
-    return [_upload_dict(r) for r in rows]
+    return _list_owned("saved_uploads", user_id, _upload_dict)
 
 
 def delete_upload(user_id: int, upload_id: int) -> bool:
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "DELETE FROM saved_uploads WHERE id = ? AND user_id = ?",
-            (upload_id, user_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+    return _delete_owned("saved_uploads", user_id, upload_id)
 
 
 def _upload_dict(row: sqlite3.Row) -> dict:
@@ -250,33 +271,19 @@ def _upload_dict(row: sqlite3.Row) -> dict:
 def add_custom_object(
     user_id: int, name: str, kind: str, x_norm: float, y_norm: float
 ) -> int:
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "INSERT INTO custom_objects (user_id, name, kind, x_norm, y_norm, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, name, kind, x_norm, y_norm, _now()),
-        )
-        conn.commit()
-        return cur.lastrowid
+    return _insert_owned(
+        "custom_objects",
+        ("user_id", "name", "kind", "x_norm", "y_norm"),
+        (user_id, name, kind, x_norm, y_norm),
+    )
 
 
 def list_custom_objects(user_id: int) -> list:
-    with closing(get_conn()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM custom_objects WHERE user_id = ? ORDER BY id DESC",
-            (user_id,),
-        ).fetchall()
-    return [_custom_object_dict(r) for r in rows]
+    return _list_owned("custom_objects", user_id, _custom_object_dict)
 
 
 def delete_custom_object(user_id: int, object_id: int) -> bool:
-    with closing(get_conn()) as conn:
-        cur = conn.execute(
-            "DELETE FROM custom_objects WHERE id = ? AND user_id = ?",
-            (object_id, user_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+    return _delete_owned("custom_objects", user_id, object_id)
 
 
 def _custom_object_dict(row: sqlite3.Row) -> dict:

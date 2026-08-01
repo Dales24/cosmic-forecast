@@ -93,6 +93,9 @@ global.fetch = jest.fn(() => Promise.resolve({
   json: () => Promise.resolve({ objects: [], predictions: [] }),
 }));
 
+// ── Shared browser constants (loaded first in every page, so first here too) ──
+require('../static/config.js');
+
 // ── Load app module ───────────────────────────────────────────────────────────
 // jest.resetModules() is called between files, so the require is fresh each run.
 const app = require('../static/app.js');

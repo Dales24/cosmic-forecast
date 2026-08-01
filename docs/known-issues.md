@@ -10,12 +10,16 @@ caveats behind the scene visualization. Grouped by area.
   (`gp.php?GROUP=...&FORMAT=tle`). Mapping: `satellite → active`, `iss → stations`.
 - **CelesTrak rate-limits repeated downloads.** Requesting the same GROUP again
   before CelesTrak's data updates returns `403 "GP data has not updated since
-  your last successful download"`. Reloading the scene rapidly can therefore
-  show *fewer* objects until the cache window passes. We degrade silently.
+  your last successful download"`. A TLE group is now cached on disk and served
+  from there for 2h (`_TLE_CACHE_TTL_SECONDS`), matching CelesTrak's own update
+  cadence, so repeated scene loads no longer hit the network at all. Past the
+  TTL a failed refresh still falls back to the last cached copy, so a throttled
+  window degrades to *stale* elements rather than an empty sky.
 - **No GP group for rocket bodies.** CelesTrak retired the dedicated file and the
-  GP API has no `rocket-bodies` group, so `rocket_body` returns an empty list
-  (an unknown group yields a non-TLE body that parses to `[]`) rather than
-  mislabeling other objects.
+  GP API has no `rocket-bodies` group. Rocket bodies are catalogued with an
+  "R/B" suffix in the object name, so the slug queries `NAME=R/B` instead of a
+  GROUP. This returns real rocket bodies, but it is a name match — anything
+  catalogued without the suffix is missed.
 - **Space debris is a single representative field.** `space_debris` is sourced
   from `cosmos-2251-debris` (a large, real debris field), not "all debris" —
   there is no generic debris group.
@@ -52,13 +56,53 @@ up with the Sun's real on-screen position.
   is fed to sgp4 to advance positions, but CelesTrak only serves the *latest*
   elements — there is no historical-TLE-by-date query. Accuracy degrades the
   further the chosen time is from now.
-- **Only JPL honors the date.** The UI datetime reaches JPL CAD as `date-min`
-  (the approach-window start). SIMBAD and CelesTrak take no date.
+- **Only JPL honors the date.** The UI datetime reaches JPL CAD as `date-min`,
+  with `date-max` computed explicitly as `date-min + 30 days`. CAD reads a
+  *relative* `date-max` ("+30") as an offset from today, not from `date-min`, so
+  the previous relative form searched the wrong window for any other date —
+  returning nothing for a future date and six years of approaches for a past
+  one. SIMBAD and CelesTrak take no date.
 - **Catalog object velocities are zero.** JPL/SIMBAD scene objects get
   `vx_norm = vy_norm = 0`; they don't participate in the forward simulation.
 - **`/api/objects/{slug}` is date-aware but unused.** That endpoint forwards the
   date to the right source, but the frontend never calls it; the scene is built
   by `/api/scene` only.
+
+## Position search
+
+`/api/scene?ra=&dec=&radius_deg=` filters the scene to a cone on the sky, using
+real great-circle separation against each object's `ra_deg`/`dec_deg`.
+
+- **Objects without a real sky position are excluded from a search.** JPL
+  near-Earth objects (CAD gives no direction) and the UFO (unknown by design)
+  carry no usable RA/Dec, so a position search drops them rather than filtering
+  on a placeholder angle. They still appear in an unfiltered scene. Earth is
+  always kept — it's the observer, not a point on the sky.
+- **The map projection collapses declination, so the search is more precise
+  than the picture.** The scene plots RA as angle and log-distance as radius;
+  declination only nudges the deep-sky band slightly. Two objects that look
+  adjacent on the map can be far apart on the real sky, and a search cone
+  appears as a radial wedge rather than a circle. The filtering is correct; the
+  2D rendering is the lossy part.
+- **Declinations for solar-system bodies come from the same approximate
+  ephemeris as their RA** — good to roughly arc-minutes, not survey-grade.
+
+## Caching and freshness
+
+Three independent layers, each keyed on what actually changes:
+
+- **Scene cache** (`_SCENE_TTL_SECONDS`, 45s): whole assembled scenes, keyed by
+  datetime + limit + search. Bounded at `_SCENE_CACHE_MAX_ENTRIES` (64) with
+  expiry pruning, since every distinct datetime is its own key.
+- **Catalog cache** (`_SIMBAD_TTL_SECONDS` 6h, `_JPL_TTL_SECONDS` 1h): keyed on
+  each source's *real* inputs, not the scene datetime — SIMBAD deep-space
+  objects are fixed on this timescale and JPL's list changes only by date.
+- **TLE disk cache** (`_TLE_CACHE_TTL_SECONDS`, 2h): raw CelesTrak text.
+
+Consequence: a scene can be served from data up to the relevant TTL old. For
+deep-space objects that's harmless; for satellites the sgp4 propagation always
+runs against the requested datetime, so only the *elements* age, not the
+positions computed from them.
 
 ## Classification
 
@@ -78,7 +122,10 @@ up with the Sun's real on-screen position.
 
 ## Robustness
 
-- **Silent degradation on fetch failure.** Every external fetch is wrapped in
-  `try/except` so one source failing never crashes the scene — but failures are
-  not surfaced in the UI. A user seeing few objects can't tell a network/rate
-  problem from genuinely sparse data.
+- **Degradation on fetch failure is quiet for users, visible to admins.** Every
+  external fetch is wrapped in `try/except` so one source failing never crashes
+  the scene. Failures now go through `api._source_unavailable`, which logs a
+  warning and records the source, kind, error and a repeat count for
+  `/api/admin/health` (shown on the admin page). The end user still sees only a
+  sparser map — they can't tell a network problem from genuinely sparse data —
+  but the information is no longer lost.

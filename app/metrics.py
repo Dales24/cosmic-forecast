@@ -112,5 +112,43 @@ class SceneCapReport:
             self._at = None
 
 
+class SourceFailureLog:
+    """Thread-safe record of recent external-catalog fetch failures.
+
+    Scene assembly swallows source errors so one outage can't take the map
+    down; without this an admin can't tell "CelesTrak is rate-limiting us" from
+    "that patch of sky is empty". Keeps the latest failure per (source, kind)
+    plus a running count, which is what a repeated outage looks like.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._failures: dict[tuple[str, str], dict] = {}
+
+    def record(self, source: str, kind: str, error: str) -> None:
+        with self._lock:
+            entry = self._failures.get((source, kind))
+            if entry is None:
+                entry = {"source": source, "kind": kind, "count": 0}
+                self._failures[(source, kind)] = entry
+            entry["count"] += 1
+            entry["error"] = error
+            entry["at"] = datetime.now(timezone.utc).isoformat()
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            rows = [dict(entry) for entry in self._failures.values()]
+        rows.sort(key=lambda row: row["at"], reverse=True)
+        return {
+            "total": sum(row["count"] for row in rows),
+            "sources": rows,
+        }
+
+    def reset(self) -> None:
+        with self._lock:
+            self._failures.clear()
+
+
 metrics = Metrics()
 scene_cap_report = SceneCapReport()
+source_failures = SourceFailureLog()

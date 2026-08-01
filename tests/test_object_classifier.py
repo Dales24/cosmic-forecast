@@ -70,7 +70,17 @@ def test_synthetic_patch_is_deterministic_and_kind_specific():
 
 
 def test_trained_model_classifies_kind_patches_as_that_kind():
-    """A patch generated for a kind is classified as that kind by a trained model."""
+    """A patch generated for a kind is classified as that kind by a trained model.
+
+    The dataset is seeded, but weight init and batch shuffling come from
+    TensorFlow's global RNG — unseeded, this test trains a different model every
+    run and fails intermittently. Seed the whole stack so a failure means the
+    classifier regressed, not that the dice came up wrong.
+    """
+    import tensorflow as tf
+
+    tf.keras.utils.set_random_seed(1234)
+
     model = create_cnn_model()
     images, labels = generate_synthetic_dataset(samples_per_class=20)
     train_model(model, images, labels, epochs=8)
