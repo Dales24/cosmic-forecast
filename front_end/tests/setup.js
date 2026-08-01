@@ -25,6 +25,7 @@ document.body.innerHTML = `
     <input id="dec"          type="text">
     <input id="obs_datetime" type="datetime-local">
     <input type="submit">
+    <button type="button" id="clear-search">Clear</button>
   </form>
   <form id="add-object-form">
     <input id="add-name" type="text">

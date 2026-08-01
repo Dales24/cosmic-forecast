@@ -126,36 +126,43 @@ def _heliocentric_ecliptic(name: str, centuries: float) -> tuple[float, float, f
     return x, y, z
 
 
-def _ecliptic_to_equatorial_ra(x: float, y: float, z: float) -> float:
-    """Right ascension (rad, 0–2π) from ecliptic rectangular coordinates."""
+def _ecliptic_to_equatorial(x: float, y: float, z: float) -> tuple[float, float]:
+    """Equatorial (right ascension, declination) in rad from ecliptic rectangular.
+
+    RA is normalised to 0–2π; declination is ±π/2.
+    """
     y_eq = y * math.cos(_OBLIQUITY) - z * math.sin(_OBLIQUITY)
-    return math.atan2(y_eq, x) % (2 * math.pi)
+    z_eq = y * math.sin(_OBLIQUITY) + z * math.cos(_OBLIQUITY)
+    ra = math.atan2(y_eq, x) % (2 * math.pi)
+    radius = math.sqrt(x * x + y_eq * y_eq + z_eq * z_eq)
+    dec = math.asin(z_eq / radius) if radius else 0.0
+    return ra, dec
 
 
-def planet_geocentric(name: str, dt: datetime) -> tuple[float, float]:
-    """Geocentric (right ascension in rad, distance in km) for a planet."""
+def planet_geocentric(name: str, dt: datetime) -> tuple[float, float, float]:
+    """Geocentric (right ascension, declination) in rad and distance in km."""
     centuries = (_julian_day(dt) - _J2000) / 36525.0
     px, py, pz = _heliocentric_ecliptic(name, centuries)
     ex, ey, ez = _heliocentric_ecliptic("earth", centuries)
     gx, gy, gz = px - ex, py - ey, pz - ez
-    ra = _ecliptic_to_equatorial_ra(gx, gy, gz)
+    ra, dec = _ecliptic_to_equatorial(gx, gy, gz)
     dist_km = math.sqrt(gx * gx + gy * gy + gz * gz) * _AU_KM
-    return ra, dist_km
+    return ra, dec, dist_km
 
 
-def sun_geocentric(dt: datetime) -> tuple[float, float]:
-    """Geocentric (right ascension in rad, distance in km) for the Sun."""
+def sun_geocentric(dt: datetime) -> tuple[float, float, float]:
+    """Geocentric (right ascension, declination) in rad and distance in km."""
     centuries = (_julian_day(dt) - _J2000) / 36525.0
     ex, ey, ez = _heliocentric_ecliptic("earth", centuries)
     # The Sun's geocentric position is the negative of Earth's heliocentric one.
     sx, sy, sz = -ex, -ey, -ez
-    ra = _ecliptic_to_equatorial_ra(sx, sy, sz)
+    ra, dec = _ecliptic_to_equatorial(sx, sy, sz)
     dist_km = math.sqrt(sx * sx + sy * sy + sz * sz) * _AU_KM
-    return ra, dist_km
+    return ra, dec, dist_km
 
 
-def moon_geocentric(dt: datetime) -> tuple[float, float]:
-    """Geocentric (right ascension in rad, distance in km) for the Moon."""
+def moon_geocentric(dt: datetime) -> tuple[float, float, float]:
+    """Geocentric (right ascension, declination) in rad and distance in km."""
     days = _julian_day(dt) - _J2000
     # Fundamental arguments (deg), abbreviated Meeus.
     mean_long = 218.316 + 13.176396 * days
@@ -175,9 +182,9 @@ def moon_geocentric(dt: datetime) -> tuple[float, float]:
         - 20905.355 * math.cos(mean_anom)
         - 3699.111 * math.cos(2 * elongation - mean_anom)
     )
-    # Ecliptic spherical → rectangular → equatorial RA.
+    # Ecliptic spherical → rectangular → equatorial.
     x = math.cos(lat) * math.cos(lon)
     y = math.cos(lat) * math.sin(lon)
     z = math.sin(lat)
-    ra = _ecliptic_to_equatorial_ra(x, y, z)
-    return ra, dist_km
+    ra, dec = _ecliptic_to_equatorial(x, y, z)
+    return ra, dec, dist_km

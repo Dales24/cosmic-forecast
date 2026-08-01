@@ -185,6 +185,38 @@ canvas.addEventListener("wheel", e => {
   zoom = nz;
 }, { passive: false });
 
+// Framing a position search: without this a 10° search leaves a handful of
+// objects scattered across the full-sky map with no hint of where to look.
+const FOCUS_MARGIN   = 0.25; // fraction of the viewport kept as padding
+const FOCUS_MIN_SPAN = 0.08; // scene units; stops one object zooming to the max
+const ZOOM_MIN = 0.15, ZOOM_MAX = 12; // same clamps the wheel handler uses
+
+function resetView() {
+  panX = 0; panY = 0; zoom = 1;
+}
+
+// Zoom and pan so `objects` fill the viewport. Returns false when there is
+// nothing to frame, or before the first frame has sized the scene.
+function focusOnObjects(objects) {
+  if (!objects || !objects.length || !SCALE) return false;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const obj of objects) {
+    minX = Math.min(minX, obj.x_norm); maxX = Math.max(maxX, obj.x_norm);
+    minY = Math.min(minY, obj.y_norm); maxY = Math.max(maxY, obj.y_norm);
+  }
+
+  const w = window.innerWidth, h = window.innerHeight;
+  const spanX = Math.max(maxX - minX, FOCUS_MIN_SPAN);
+  const spanY = Math.max(maxY - minY, FOCUS_MIN_SPAN);
+  const fit   = Math.min(w / (spanX * SCALE), h / (spanY * SCALE)) * (1 - FOCUS_MARGIN);
+
+  zoom = Math.max(ZOOM_MIN, Math.min(fit, ZOOM_MAX));
+  panX = w / 2 - (CX + ((minX + maxX) / 2) * SCALE) * zoom;
+  panY = h / 2 - (CY + ((minY + maxY) / 2) * SCALE) * zoom;
+  return true;
+}
+
 // ── Simulation state ──────────────────────────────────────────────────────────
 const SIM_SPEED = 200;
 let forecastPaths = null;
@@ -259,17 +291,40 @@ async function persistCustomObject(name, kind, x, y) {
   } catch { /* offline — object still shows this session */ }
 }
 
-async function loadScene(datetimeISO) {
+// Returns {ok, count, search, invalid, error}. On failure the previous scene
+// stays on screen, which would otherwise look like a successful load of the
+// wrong moment. `invalid` marks rejected input (bad coordinates) as opposed to
+// a source being unreachable — the two need different messages.
+async function loadScene(datetimeISO, search) {
   updateLegendLoading(true);
+  let ok = false;
+  let matched = null;
+  let invalid = false;
+  let error = null;
   try {
-    const qs   = datetimeISO ? "?datetime_str=" + encodeURIComponent(datetimeISO) : "";
-    const resp = await fetch("/api/scene" + qs);
+    const params = new URLSearchParams();
+    if (datetimeISO) params.set("datetime_str", datetimeISO);
+    // Both coordinates or neither — the API rejects half a position search.
+    if (search && search.ra && search.dec) {
+      params.set("ra", search.ra);
+      params.set("dec", search.dec);
+    }
+    const qs   = params.toString();
+    const resp = await fetch("/api/scene" + (qs ? "?" + qs : ""));
+    if (!resp.ok) {
+      // 4xx is the server rejecting what was typed; report what it said.
+      invalid = resp.status >= 400 && resp.status < 500;
+      error   = invalid ? await validationDetail(resp) : "scene request failed (" + resp.status + ")";
+      throw new Error(error);
+    }
     const data = await resp.json();
     sceneObjects = data.objects || [];
+    matched = data.search || null;
     await mergeCustomObjects(); // the user's own saved objects
     syncLocalBodies(); // point the Sun/Moon artwork at their real positions
-  } catch {
-    // keep whatever we had
+    ok = true;
+  } catch (err) {
+    if (!error) error = err.message;
   }
   objPositions = sceneObjects.map(() => ({ x: 0, y: 0 }));
   // clear stale caches
@@ -278,6 +333,23 @@ async function loadScene(datetimeISO) {
   selectedIdx = null;
   hideObjectInfo();
   updateLegend();
+  // Frame a successful search; a plain load goes back to the whole sky.
+  if (ok && matched) focusOnObjects(sceneObjects);
+  else if (ok) resetView();
+  return { ok, count: sceneObjects.length, search: matched, invalid, error };
+}
+
+// FastAPI puts the reason in `detail`; fall back to the status if the body
+// isn't the shape we expect.
+async function validationDetail(resp) {
+  try {
+    const body = await resp.json();
+    if (typeof body.detail === "string") return body.detail;
+    if (Array.isArray(body.detail) && body.detail.length) {
+      return body.detail[0].msg || "invalid input";
+    }
+  } catch { /* not JSON */ }
+  return "invalid input (" + resp.status + ")";
 }
 
 // ── Legend (dynamic) ──────────────────────────────────────────────────────────
@@ -1413,15 +1485,57 @@ playBtn.addEventListener("click", async () => {
 });
 
 // ── Form: load scene ──────────────────────────────────────────────────────────
-document.getElementById("scene-form").addEventListener("submit", function (e) {
+// The date/time field is UTC (so is the label), matching what /api/scene expects.
+function sceneResultHTML(ra, dec, utcMinutes, result) {
+  // Rejected input and an unreachable catalog are different problems: one the
+  // user can fix by retyping, the other they can only retry.
+  if (!result.ok && result.invalid) {
+    return '<div class="results">' +
+      '<h3>Check Your Search</h3>' +
+      '<p>' + esc(result.error || "invalid input") + '</p>' +
+      '<p style="margin-top:0.5rem;color:#7a9acc;font-size:0.82rem;">' +
+        'RA is 0–360&deg;, Dec is -90–90&deg;. Give both, or neither for the whole sky.' +
+      '</p>' +
+    '</div>';
+  }
+  if (!result.ok) {
+    return '<div class="results">' +
+      '<h3>Scene Failed to Load</h3>' +
+      '<p>Could not reach the catalogs for ' + esc(utcMinutes) + ' UTC. ' +
+        'The previous scene is still shown.</p>' +
+    '</div>';
+  }
+  // A position search reports what it searched, so an empty patch of sky reads
+  // as an empty result rather than a broken load.
+  const search = result.search;
+  const coords = search
+    ? '<p>RA: ' + esc(ra) + ' &nbsp; Dec: ' + esc(dec) +
+      ' &nbsp; within ' + search.radius_deg + '&deg;</p>'
+    : (ra && dec ? '<p>RA: ' + esc(ra) + ' &nbsp; Dec: ' + esc(dec) + '</p>' : '');
+  const tally = search
+    ? '<p>' + search.matched + ' of ' + search.searched + ' objects in this patch of sky</p>'
+    : '<p>' + result.count + ' object' + (result.count === 1 ? '' : 's') + ' loaded</p>';
+  return '<div class="results">' +
+      '<h3>' + (search ? 'Position Search' : 'Loaded Scene') + '</h3>' +
+      coords +
+      '<p>Time: ' + esc(utcMinutes) + ' UTC</p>' +
+      tally +
+      '<p style="margin-top:0.5rem;color:#7a9acc;font-size:0.82rem;">' +
+        'Scene paused. Press &#9654; Play to simulate forward.' +
+      '</p>' +
+    '</div>';
+}
+
+document.getElementById("scene-form").addEventListener("submit", async function (e) {
   e.preventDefault();
 
   const ra          = document.getElementById("ra").value.trim();
   const dec         = document.getElementById("dec").value.trim();
-  const obsDatetime = document.getElementById("obs_datetime").value; // YYYY-MM-DDTHH:MM
+  const obsDatetime = document.getElementById("obs_datetime").value; // YYYY-MM-DDTHH:MM UTC
 
   const dtISO = obsDatetime ? obsDatetime + ":00Z" : new Date().toISOString();
   const ts    = new Date(dtISO).getTime();
+  const stamp = dtISO.slice(0, 16).replace("T", " ");
 
   // Reset simulation to frozen at this moment
   simMode      = true;
@@ -1433,21 +1547,40 @@ document.getElementById("scene-form").addEventListener("submit", function (e) {
   playBtn.textContent = "▶ Play Simulation";
   playBtn.classList.remove("playing");
   simTimeEl.style.display = "block";
-  simTimeEl.textContent   = "Paused — " + (obsDatetime || dtISO.slice(0, 16)).replace("T", " ");
+  simTimeEl.textContent   = "Paused — " + stamp;
 
-  const html = ra && dec
-    ? '<div class="results">' +
-        '<h3>Loaded Scene</h3>' +
-        '<p>RA: ' + esc(ra) + ' &nbsp; Dec: ' + esc(dec) + '</p>' +
-        '<p>Time: ' + esc(obsDatetime || "") + ' UTC</p>' +
-        '<p style="margin-top:0.5rem;color:#7a9acc;font-size:0.82rem;">' +
-          'Scene paused. Press &#9654; Play to simulate forward.' +
-        '</p>' +
-      '</div>'
-    : '';
-  document.getElementById("scene-result").innerHTML = html;
+  // Every load reports back, so the button is never a no-op on screen.
+  const resultEl = document.getElementById("scene-result");
+  resultEl.innerHTML = '<div class="results"><p>Loading ' + esc(stamp) + ' UTC…</p></div>';
+  const result = await loadScene(dtISO, { ra, dec });
+  resultEl.innerHTML = sceneResultHTML(ra, dec, stamp, result);
+});
 
-  loadScene(dtISO);
+// Clear the position search and go back to the whole sky at the current time.
+// The date/time is reset too, so Clear always lands on a known-good state.
+document.getElementById("clear-search").addEventListener("click", async function () {
+  document.getElementById("ra").value  = "";
+  document.getElementById("dec").value = "";
+
+  const now = new Date();
+  const utcMinutes = now.toISOString().slice(0, 16);
+  document.getElementById("obs_datetime").value = utcMinutes;
+
+  simMode      = true;
+  simPaused    = true;
+  simStartReal = performance.now();
+  simStartEff  = now.getTime();
+  forecastPaths = null;
+
+  playBtn.textContent = "▶ Play Simulation";
+  playBtn.classList.remove("playing");
+  simTimeEl.style.display = "block";
+  simTimeEl.textContent   = "Paused — " + utcMinutes.replace("T", " ");
+
+  const resultEl = document.getElementById("scene-result");
+  resultEl.innerHTML = '<div class="results"><p>Clearing search…</p></div>';
+  const result = await loadScene(utcMinutes + ":00Z");
+  resultEl.innerHTML = sceneResultHTML("", "", utcMinutes.replace("T", " "), result);
 });
 
 function esc(s) {
@@ -1601,19 +1734,22 @@ async function handleCSVUpload(file) {
 
 // ── Auto-load on page start ───────────────────────────────────────────────────
 (function init() {
-  const now   = new Date();
-  // Format local time as YYYY-MM-DDTHH:MM for the input field
-  const local = new Date(now - now.getTimezoneOffset() * 60000);
-  document.getElementById("obs_datetime").value = local.toISOString().slice(0, 16);
+  const now = new Date();
+  // The field is UTC, like its label and the API — seeding it with local time
+  // made an untouched form reload a different moment than the one just shown.
+  const utcMinutes = now.toISOString().slice(0, 16);
+  document.getElementById("obs_datetime").value = utcMinutes;
 
   simMode      = true;
   simPaused    = true;
   simStartReal = performance.now();
   simStartEff  = now.getTime();
   simTimeEl.style.display = "block";
-  simTimeEl.textContent   = "Paused — " + local.toISOString().slice(0, 16).replace("T", " ");
+  simTimeEl.textContent   = "Paused — " + utcMinutes.replace("T", " ");
 
-  loadScene(now.toISOString());
+  // Minute precision, like the form sends. A millisecond-precision stamp is a
+  // unique cache key on every load, so the server's scene cache never hit.
+  loadScene(utcMinutes + ":00Z");
 })();
 
 // ── Testing interface (no-op in browser where `module` is undefined) ──────────
@@ -1623,7 +1759,7 @@ if (typeof module !== "undefined") {
     KIND_STYLES, KIND_NAMES, KIND_FACTS, KIND_LINKS, CSV_TEMPLATE, SIM_SPEED, HIT_RADIUS, PLANET_STYLES, SUN, MOON,
     THEMES, DEFAULT_THEME,
     // Stateless pure functions
-    esc,
+    esc, sceneResultHTML, focusOnObjects, resetView, validationDetail,
     effectiveTime,
     findObjectAt,
     setTheme, kindStyle, mixHex, DISTANCE_BANDS, customObjectXY, addToScene,
@@ -1644,6 +1780,12 @@ if (typeof module !== "undefined") {
     set panY(v)         { panY = v; },
     get zoom()          { return zoom; },
     set zoom(v)         { zoom = v; },
+    get CX()            { return CX; },
+    set CX(v)           { CX = v; },
+    get CY()            { return CY; },
+    set CY(v)           { CY = v; },
+    get SCALE()         { return SCALE; },
+    set SCALE(v)        { SCALE = v; },
     get simMode()       { return simMode; },
     set simMode(v)      { simMode = v; },
     get simPaused()     { return simPaused; },

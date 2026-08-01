@@ -338,6 +338,29 @@ input[type="submit"] {
 
 input[type="submit"]:hover { filter: brightness(1.08); }
 
+/* Load is the primary action; Clear sits beside it at its natural width. */
+.form-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+.form-actions input[type="submit"] { flex: 1; }
+
+.secondary-btn {
+  padding: 0.75rem 1.1rem;
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.18));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+
+.secondary-btn:hover { background: rgba(255, 255, 255, 0.08); }
+
 .results {
   margin-top: 1.5rem;
   padding-top: 1.25rem;

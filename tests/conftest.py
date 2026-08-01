@@ -7,10 +7,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 @pytest.fixture(autouse=True)
-def _clear_scene_cache():
-    """The /api/scene cache is process-global; clear it between tests so mocked
-    fetchers in one test never serve a stale scene to another."""
-    from app.api import _clear_scene_cache as clear
+def _clear_api_caches():
+    """The scene and per-catalog caches are process-global; clear both between
+    tests so mocked fetchers in one test never serve a stale result to another."""
+    from app.api import _clear_catalog_cache, _clear_scene_cache
 
-    clear()
+    _clear_scene_cache()
+    _clear_catalog_cache()
     yield

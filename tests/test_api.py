@@ -1,6 +1,7 @@
 """Tests for all FastAPI endpoints in app/api.py."""
 
 import io
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app import api
 from app.api import (
     app,
     _propagate_tles,
@@ -282,12 +284,175 @@ def test_scene_accepts_datetime_str():
     assert "2025-06-01" in r.json()["datetime"]
 
 
-def test_scene_invalid_datetime_falls_back():
+def test_scene_rejects_invalid_datetime():
+    """Better a clear error than silently serving *now* for the picked date."""
     with _offline_catalogs(
         patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
     ):
         r = client.get("/api/scene?datetime_str=not-a-date")
-    assert r.status_code == 200  # falls back to now, no crash
+    assert r.status_code == 422
+    assert "ISO 8601" in r.json()["detail"]
+
+
+def test_scene_empty_datetime_means_now():
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        r = client.get("/api/scene?datetime_str=")
+    assert r.status_code == 200
+
+
+# ── Position search ───────────────────────────────────────────────────────────
+
+
+def test_angular_separation_basics():
+    assert api._angular_separation_deg(0, 0, 0, 0) == pytest.approx(0.0)
+    assert api._angular_separation_deg(0, 0, 90, 0) == pytest.approx(90.0)
+    assert api._angular_separation_deg(0, 90, 0, -90) == pytest.approx(180.0)
+    # Wrapping across RA 0/360 is a short hop, not a long way round.
+    assert api._angular_separation_deg(359, 0, 1, 0) == pytest.approx(2.0)
+
+
+def test_objects_near_keeps_only_what_is_inside_the_cone():
+    objects = [
+        {"kind": "star", "ra_deg": 10.0, "dec_deg": 0.0},  # 10° away
+        {"kind": "star", "ra_deg": 40.0, "dec_deg": 0.0},  # 40° away
+    ]
+    near = api._objects_near(objects, 0.0, 0.0, 30.0)
+    assert [o["ra_deg"] for o in near] == [10.0]
+
+
+def test_objects_near_drops_objects_with_no_sky_position():
+    """JPL close approaches and the UFO carry no direction, so a position
+    search cannot honestly claim they are in the requested patch."""
+    objects = [
+        {"kind": "near_earth_object", "ra_deg": None, "dec_deg": None},
+        {"kind": "ufo"},
+    ]
+    assert api._objects_near(objects, 0.0, 0.0, 180.0) == []
+
+
+def test_objects_near_always_keeps_earth():
+    """Earth is the observer, not a point of sky that can be out of frame."""
+    earth = {"kind": "earth"}
+    assert api._objects_near([earth], 123.0, -45.0, 1.0) == [earth]
+
+
+def test_scene_position_search_narrows_the_result():
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        full = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z").json()
+        narrow = client.get(
+            "/api/scene?datetime_str=2025-06-01T12:00:00Z&ra=180&dec=0&radius_deg=10"
+        ).json()
+
+    assert narrow["search"]["matched"] <= narrow["search"]["searched"]
+    assert len(narrow["objects"]) < len(full["objects"])
+    for obj in narrow["objects"]:
+        if obj["kind"] == "earth":
+            continue
+        assert (
+            api._angular_separation_deg(obj["ra_deg"], obj["dec_deg"], 180.0, 0.0)
+            <= 10.0
+        )
+
+
+def test_scene_accepts_a_degree_sign_on_coordinates():
+    """The form's placeholder shows "83.82°", so that must parse."""
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        r = client.get("/api/scene?ra=83.82%C2%B0&dec=-5.39%C2%B0")
+    assert r.status_code == 200
+    assert r.json()["search"]["ra_deg"] == pytest.approx(83.82)
+    assert r.json()["search"]["dec_deg"] == pytest.approx(-5.39)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "ra=10",  # dec missing
+        "dec=10",  # ra missing
+        "ra=abc&dec=0",  # not a number
+        "ra=0&dec=200",  # dec out of range
+        "ra=0&dec=0&radius_deg=0",  # empty cone
+        "ra=0&dec=0&radius_deg=200",  # bigger than the sky
+    ],
+)
+def test_scene_rejects_bad_position_searches(query):
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        r = client.get("/api/scene?" + query)
+    assert r.status_code == 422
+
+
+def test_scene_without_coordinates_returns_no_search_block():
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
+    assert "search" not in r.json()
+
+
+def test_scene_objects_carry_sky_coordinates():
+    """Position search is only meaningful if the objects expose real RA/Dec."""
+    tle_text = (
+        "ISS (ZARYA)\n"
+        "1 25544U 98067A   24001.50000000  .00001234  00000-0  27890-4 0  9990\n"
+        "2 25544  51.6400 100.0000 0001500  50.0000 310.0000 15.50000000000014\n"
+    )
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", return_value=tle_text)
+    ):
+        objects = client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z").json()[
+            "objects"
+        ]
+
+    for kind in ("iss", "planet", "sun", "moon"):
+        placed = [o for o in objects if o["kind"] == kind]
+        assert placed, f"no {kind} in scene"
+        for obj in placed:
+            assert 0.0 <= obj["ra_deg"] < 360.0, kind
+            assert -90.0 <= obj["dec_deg"] <= 90.0, kind
+
+
+# ── Scene cache ───────────────────────────────────────────────────────────────
+
+
+def test_scene_cache_evicts_expired_entries_and_stays_bounded():
+    """One entry per distinct datetime, so an unbounded cache would only grow."""
+    api._clear_scene_cache()
+    for index in range(api._SCENE_CACHE_MAX_ENTRIES + 10):
+        api._cache_scene((f"key-{index}", None), {"objects": []})
+    assert len(api._scene_cache) <= api._SCENE_CACHE_MAX_ENTRIES
+
+    api._clear_scene_cache()
+    api._cache_scene(("stale", None), {"objects": []})
+    with patch("app.api.time.time", return_value=time.time() + 999):
+        assert api._cached_scene(("stale", None)) is None
+    assert "stale" not in [key[0] for key in api._scene_cache]
+
+
+def test_scene_cache_returns_the_same_payload_within_its_ttl():
+    api._clear_scene_cache()
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ) as _:
+        first = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z").json()
+    # No catalog patch this time: a miss would try the network and differ.
+    second = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z").json()
+    assert first == second
+
+
+def test_scene_naive_datetime_is_treated_as_utc():
+    with _offline_catalogs(
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
+    ):
+        r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00")
+    assert r.status_code == 200
+    assert r.json()["datetime"] == "2025-06-01T12:00:00+00:00"
 
 
 def test_scene_includes_tle_objects_when_celestrak_responds():

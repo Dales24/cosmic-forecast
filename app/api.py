@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
-from math import atan2, cos, log10, pi, sin, sqrt
+from math import acos, asin, atan2, cos, degrees, log10, pi, radians, sin, sqrt
 from typing import Iterator, NamedTuple
 
 import numpy as np
@@ -173,7 +173,38 @@ def _tle_scene_object(obj_id: str, name: str, kind: str, r, v) -> dict:
         "vy_norm": radius * omega * cos(angle),
         "speed_kms": sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2),
         "source": "celestrak",
+        # ECI direction is the object's real sky position, so it is searchable.
+        "ra_deg": degrees(angle) % 360.0,
+        "dec_deg": degrees(asin(z / distance_km)) if distance_km else 0.0,
     }
+
+
+# ── Catalog result cache ──────────────────────────────────────────────────────
+# The scene cache alone is keyed by the exact datetime, so every new minute
+# refetched all eight catalogs. Most of that work doesn't depend on the minute:
+# SIMBAD's deep-space objects are fixed on the sim's timescale, and JPL's
+# close-approach list only changes by date. Cache each on its own real inputs.
+_SIMBAD_TTL_SECONDS = 6 * 60 * 60
+_JPL_TTL_SECONDS = 60 * 60
+_catalog_cache: dict[tuple, tuple[float, "CappedObjects"]] = {}
+
+
+def _clear_catalog_cache() -> None:
+    _catalog_cache.clear()
+
+
+def _cached_catalog(key: tuple, ttl: float, fetch) -> "CappedObjects":
+    """Memoize one catalog fetch under `key` for `ttl` seconds.
+
+    Called from the scene's thread pool; a race just means two threads fetch
+    the same catalog once, which is harmless.
+    """
+    cached = _catalog_cache.get(key)
+    if cached and (time.time() - cached[0]) < ttl:
+        return cached[1]
+    result = fetch()
+    _catalog_cache[key] = (time.time(), result)
+    return result
 
 
 # ── Capped catalog sources ────────────────────────────────────────────────────
@@ -223,6 +254,14 @@ def _jpl_scene_objects(date_str: str, cap: int) -> CappedObjects:
     The approach *distance* is real and sets the object's radius on the shared
     scale; the direction is a deterministic placeholder (CAD gives no position).
     """
+    return _cached_catalog(
+        ("jpl", date_str, cap),
+        _JPL_TTL_SECONDS,
+        lambda: _fetch_jpl_objects(date_str, cap),
+    )
+
+
+def _fetch_jpl_objects(date_str: str, cap: int) -> CappedObjects:
     from app.data_parser import fetch_jpl
 
     try:
@@ -302,6 +341,14 @@ def _simbad_scene_objects(kind: str, cap: int) -> CappedObjects:
     distance puts them all on the outer sky band, spread slightly by declination.
     They are fixed over the simulation's timescale, so velocity is zero.
     """
+    return _cached_catalog(
+        ("simbad", kind, cap),
+        _SIMBAD_TTL_SECONDS,
+        lambda: _fetch_simbad_objects(kind, cap),
+    )
+
+
+def _fetch_simbad_objects(kind: str, cap: int) -> CappedObjects:
     from app.data_parser import fetch_simbad
 
     try:
@@ -331,6 +378,8 @@ def _simbad_scene_objects(kind: str, cap: int) -> CappedObjects:
                 "vy_norm": 0.0,
                 "speed_kms": 0.0,
                 "source": "simbad",
+                "ra_deg": ra % 360.0,
+                "dec_deg": dec,
             }
         )
     return CappedObjects(objects, hidden, hidden_exact)
@@ -392,7 +441,7 @@ def _planet_scene_objects(dt: datetime) -> list[dict]:
 
     objects: list[dict] = []
     for name, speed_kms, description in _PLANETS:
-        ra, dist_km = ephemeris.planet_geocentric(name.lower(), dt)
+        ra, dec, dist_km = ephemeris.planet_geocentric(name.lower(), dt)
         x_norm, y_norm = _radec_scene_xy(ra, dist_km)
         objects.append(
             {
@@ -406,6 +455,8 @@ def _planet_scene_objects(dt: datetime) -> list[dict]:
                 "speed_kms": speed_kms,
                 "source": "ephemeris",
                 "description": description,
+                "ra_deg": degrees(ra) % 360.0,
+                "dec_deg": degrees(dec),
             }
         )
     return objects
@@ -415,7 +466,8 @@ def _sun_scene_object(dt: datetime) -> dict:
     """The Sun at its real geocentric position for `dt`."""
     from app import ephemeris
 
-    x_norm, y_norm = _radec_scene_xy(*ephemeris.sun_geocentric(dt))
+    ra, dec, dist_km = ephemeris.sun_geocentric(dt)
+    x_norm, y_norm = _radec_scene_xy(ra, dist_km)
     return {
         "id": "body-Sun",
         "name": "Sun",
@@ -426,6 +478,8 @@ def _sun_scene_object(dt: datetime) -> dict:
         "vy_norm": 0.0,
         "speed_kms": 0.0,
         "source": "ephemeris",
+        "ra_deg": degrees(ra) % 360.0,
+        "dec_deg": degrees(dec),
         "description": (
             "The star at the heart of the solar system; its fusion powers the "
             "light and warmth that make Earth habitable."
@@ -437,7 +491,8 @@ def _moon_scene_object(dt: datetime) -> dict:
     """The Moon at its real geocentric position for `dt`."""
     from app import ephemeris
 
-    x_norm, y_norm = _radec_scene_xy(*ephemeris.moon_geocentric(dt))
+    ra, dec, dist_km = ephemeris.moon_geocentric(dt)
+    x_norm, y_norm = _radec_scene_xy(ra, dist_km)
     return {
         "id": "body-Moon",
         "name": "Moon",
@@ -448,6 +503,8 @@ def _moon_scene_object(dt: datetime) -> dict:
         "vy_norm": 0.0,
         "speed_kms": 1.022,
         "source": "ephemeris",
+        "ra_deg": degrees(ra) % 360.0,
+        "dec_deg": degrees(dec),
         "description": (
             "Earth's only natural satellite; its gravity drives the ocean tides "
             "and it always shows us the same face."
@@ -488,11 +545,44 @@ class ForecastRequest(BaseModel):
 # Scenes hit slow external catalogs, so cache each (datetime, limit) result for a
 # short window — repeated loads (panning, re-opening) skip the network entirely.
 _SCENE_TTL_SECONDS = 45.0
+# Every distinct datetime is its own key, so an unbounded cache would grow one
+# ~100-object entry per request and never shrink.
+_SCENE_CACHE_MAX_ENTRIES = 64
 _scene_cache: dict[tuple, tuple[float, dict]] = {}
 
 
 def _clear_scene_cache() -> None:
     _scene_cache.clear()
+
+
+def _cached_scene(cache_key: tuple) -> dict | None:
+    """The cached scene for `cache_key`, if one is still inside its TTL."""
+    cached = _scene_cache.get(cache_key)
+    if cached is None:
+        return None
+    if (time.time() - cached[0]) >= _SCENE_TTL_SECONDS:
+        del _scene_cache[cache_key]
+        return None
+    return cached[1]
+
+
+def _cache_scene(cache_key: tuple, result: dict) -> None:
+    """Store a scene, dropping expired entries and capping total size."""
+    now = time.time()
+    expired = [
+        key
+        for key, (stored_at, _) in _scene_cache.items()
+        if (now - stored_at) >= _SCENE_TTL_SECONDS
+    ]
+    for key in expired:
+        del _scene_cache[key]
+
+    # Still full of live entries: evict the oldest to make room.
+    while len(_scene_cache) >= _SCENE_CACHE_MAX_ENTRIES:
+        oldest = min(_scene_cache, key=lambda key: _scene_cache[key][0])
+        del _scene_cache[oldest]
+
+    _scene_cache[cache_key] = (now, result)
 
 
 def _capped_scene_objects(
@@ -558,23 +648,108 @@ def _record_scene_caps(cap_rows: list[dict]) -> None:
         log.info("Scene caps hid %d object(s): %s", hidden, detail)
 
 
+# ── Position search ───────────────────────────────────────────────────────────
+# Default cone half-angle when a search gives coordinates but no radius.
+_DEFAULT_SEARCH_RADIUS_DEG = 30.0
+# Always kept in a position search: Earth is the observer's vantage point, not a
+# point on the sky it could be near or far from.
+_UNPLACEABLE_KEEP_KINDS = {"earth"}
+
+
+def _angular_separation_deg(
+    ra_a: float, dec_a: float, ra_b: float, dec_b: float
+) -> float:
+    """Great-circle angle in degrees between two (RA, Dec) points in degrees."""
+    ra_a, dec_a, ra_b, dec_b = map(radians, (ra_a, dec_a, ra_b, dec_b))
+    cosine = sin(dec_a) * sin(dec_b) + cos(dec_a) * cos(dec_b) * cos(ra_a - ra_b)
+    return degrees(acos(max(-1.0, min(1.0, cosine))))  # clamp away FP drift
+
+
+def _objects_near(
+    objects: list[dict], ra_deg: float, dec_deg: float, radius_deg: float
+) -> list[dict]:
+    """The objects within `radius_deg` of (ra_deg, dec_deg) on the sky.
+
+    Objects with no real sky position are dropped: JPL's close-approach records
+    carry no direction, and the UFO's position is unknown by design, so neither
+    can honestly answer "is it in this part of the sky?".
+    """
+    near: list[dict] = []
+    for obj in objects:
+        if obj["kind"] in _UNPLACEABLE_KEEP_KINDS:
+            near.append(obj)
+            continue
+        if obj.get("ra_deg") is None or obj.get("dec_deg") is None:
+            continue
+        separation = _angular_separation_deg(
+            obj["ra_deg"], obj["dec_deg"], ra_deg, dec_deg
+        )
+        if separation <= radius_deg:
+            near.append(obj)
+    return near
+
+
+def _parse_search_coord(value: str | None, name: str, limit: float) -> float | None:
+    """Parse one search coordinate in degrees, or None when it wasn't given.
+
+    Accepts a bare number or a trailing degree sign ("83.82" or "83.82°"), which
+    is what the form's placeholder shows.
+    """
+    if value is None or not str(value).strip():
+        return None
+    cleaned = str(value).strip().rstrip("°").strip()
+    try:
+        degrees_value = float(cleaned)
+    except ValueError:
+        raise HTTPException(422, f"{name} must be a number, got {value!r}") from None
+    if not -limit <= degrees_value <= limit:
+        raise HTTPException(422, f"{name} must be between -{limit} and {limit}")
+    return degrees_value
+
+
+def _parse_scene_datetime(datetime_str: str | None) -> datetime:
+    """The scene's moment, as an aware UTC datetime. Empty/absent means now.
+
+    An unparseable value is rejected rather than defaulted to now: silently
+    showing the present for a date the user picked is worse than an error.
+    """
+    if not datetime_str:
+        return datetime.now(timezone.utc)
+    try:
+        dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(
+            422, f"datetime_str must be ISO 8601, got {datetime_str!r}"
+        ) from None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 @app.get("/api/scene")
-def get_scene(datetime_str: str | None = None, limit: int | None = None):
-    cache_key = (datetime_str, limit)
-    cached = _scene_cache.get(cache_key)
-    if cached and (time.time() - cached[0]) < _SCENE_TTL_SECONDS:
-        return cached[1]
+def get_scene(
+    datetime_str: str | None = None,
+    limit: int | None = None,
+    ra: str | None = None,
+    dec: str | None = None,
+    radius_deg: float = _DEFAULT_SEARCH_RADIUS_DEG,
+):
+    """The scene for a moment, optionally narrowed to a patch of sky.
 
-    if datetime_str:
-        try:
-            dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
-        except ValueError:
-            dt = datetime.now(timezone.utc)
-    else:
-        dt = datetime.now(timezone.utc)
+    `ra`/`dec` are degrees; give both to search. `radius_deg` is the cone's
+    half-angle around them.
+    """
+    cache_key = (datetime_str, limit, ra, dec, radius_deg)
+    cached = _cached_scene(cache_key)
+    if cached is not None:
+        return cached
 
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+    search_ra = _parse_search_coord(ra, "ra", 360.0)
+    search_dec = _parse_search_coord(dec, "dec", 90.0)
+    if (search_ra is None) != (search_dec is None):
+        raise HTTPException(422, "ra and dec must be given together")
+    if radius_deg <= 0 or radius_deg > 180:
+        raise HTTPException(422, "radius_deg must be between 0 and 180")
+
+    dt = _parse_scene_datetime(datetime_str)
 
     satellite_cap = limit if limit is not None else config.scene_cap("satellite")
     objects, cap_rows = _capped_scene_objects(dt, satellite_cap)
@@ -602,7 +777,17 @@ def get_scene(datetime_str: str | None = None, limit: int | None = None):
     )
 
     result = {"datetime": dt.isoformat(), "objects": objects}
-    _scene_cache[cache_key] = (time.time(), result)
+    if search_ra is not None and search_dec is not None:
+        total = len(objects)
+        result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)
+        result["search"] = {
+            "ra_deg": search_ra,
+            "dec_deg": search_dec,
+            "radius_deg": radius_deg,
+            "matched": len(result["objects"]),
+            "searched": total,
+        }
+    _cache_scene(cache_key, result)
     return result
 
 

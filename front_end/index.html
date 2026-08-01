@@ -69,7 +69,10 @@
           <label for="obs_datetime">Observation Date &amp; Time (UTC)</label>
           <input id="obs_datetime" type="datetime-local" name="obs_datetime">
 
-          <input type="submit" value="Load Scene">
+          <div class="form-actions">
+            <input type="submit" value="Load Scene">
+            <button type="button" id="clear-search" class="secondary-btn">Clear</button>
+          </div>
         </form>
 
         <div id="scene-result"></div>

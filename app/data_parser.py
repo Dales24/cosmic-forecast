@@ -21,6 +21,8 @@ Data fetchers per object type, sourced from the plan:
 from __future__ import annotations
 
 import os
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -32,6 +34,9 @@ _TIMEOUT = 10  # seconds per request
 # window. We cache each successful download and fall back to it on any failure,
 # so a throttled refresh never empties the scene. Override dir with COSMIC_TLE_CACHE_DIR.
 _TLE_CACHE_DIR = Path(os.environ.get("COSMIC_TLE_CACHE_DIR", "data/tle_cache"))
+# CelesTrak republishes a group about every 2h; within that, a re-download
+# returns the same bytes (or a 403), so serve the cached copy instead.
+_TLE_CACHE_TTL_SECONDS = 2 * 60 * 60
 
 # ── CelesTrak ─────────────────────────────────────────────────────────────────
 # CelesTrak retired the legacy /pub/TLE/*.txt files (now HTTP 403); use the GP
@@ -88,18 +93,34 @@ def _tle_cache_path(slug: str) -> Path:
     return _TLE_CACHE_DIR / f"{slug}.tle"
 
 
+def _cached_tle_age(path: Path) -> float | None:
+    """Seconds since the cache file was written, or None if there isn't one."""
+    try:
+        return time.time() - path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def fetch_celestrak_text(slug: str) -> str:
     """Fetch a CelesTrak group as raw TLE text, cached on disk.
 
-    Tries each candidate query for the slug in order; the first success is
-    cached and returned. If every candidate fails (notably the 403 CelesTrak
-    returns for an unchanged group) the last cached copy is served instead.
+    A cache younger than `_TLE_CACHE_TTL_SECONDS` is served straight from disk:
+    CelesTrak only republishes a group every ~2h, so re-downloading per scene
+    costs a round trip per group and returns identical bytes. Otherwise each
+    candidate query is tried in order and the first success is cached. A stale
+    cache still beats nothing, so it is served if every candidate fails
+    (notably the 403 CelesTrak returns for an unchanged group).
     Raises only when all candidates fail and no cache exists.
     """
     urls = _CELESTRAK_URLS.get(slug)
     if not urls:
         raise ValueError(f"No CelesTrak URL for slug {slug!r}")
     path = _tle_cache_path(slug)
+
+    age = _cached_tle_age(path)
+    if age is not None and age < _TLE_CACHE_TTL_SECONDS:
+        return path.read_text()
+
     for url in urls:
         try:
             resp = requests.get(url, timeout=_TIMEOUT)
@@ -122,12 +143,32 @@ def fetch_celestrak(slug: str, limit: int = 20) -> list[dict]:
 # ── NASA JPL Small-Body Database / CNEOS ─────────────────────────────────────
 _JPL_CAD_URL = "https://ssd-api.jpl.nasa.gov/cad.api"
 
+# How far past the requested date to look for close approaches.
+_JPL_WINDOW_DAYS = 30
+
+
+def _jpl_window_end(date: str | None) -> str:
+    """Date-max for a window of `_JPL_WINDOW_DAYS` starting at `date`.
+
+    CAD reads a relative date-max ("+30") as an offset from *today*, not from
+    date-min, so any date but "now" needs the end spelled out — otherwise a past
+    date searches everything up to today and a future one searches nothing.
+    """
+    relative = f"+{_JPL_WINDOW_DAYS}"
+    if not date or date == "now":
+        return relative
+    try:
+        start = datetime.strptime(date[:10], "%Y-%m-%d")
+    except ValueError:
+        return relative  # let CAD reject the malformed date-min itself
+    return (start + timedelta(days=_JPL_WINDOW_DAYS)).strftime("%Y-%m-%d")
+
 
 def fetch_jpl(date: str | None = None, limit: int = 20) -> list[dict]:
     """Close-approach data from JPL CAD API (covers asteroids, comets, NEOs)."""
     params = {
         "date-min": date or "now",
-        "date-max": "+30",
+        "date-max": _jpl_window_end(date),
         "dist-max": "0.2",  # within 0.2 AU
         "sort": "dist",
         "limit": str(limit),
