@@ -7,7 +7,15 @@ caveats behind the scene visualization. Grouped by area.
 
 - **CelesTrak legacy URLs are dead.** The old `https://celestrak.org/pub/TLE/*.txt`
   files now return HTTP 403. We use the GP query API instead
-  (`gp.php?GROUP=...&FORMAT=tle`). Mapping: `satellite → active`, `iss → stations`.
+  (`gp.php?GROUP=...&FORMAT=tle`). Mapping: `iss → stations`,
+  `space_debris → cosmos-2251-debris`.
+- **"Satellite" may not be the whole catalogue.** The `satellite` slug tries
+  three queries in order — `active`, then `starlink`, then `last-30-days` — and
+  the first that responds wins. `active` is the canonical set but is CelesTrak's
+  most throttled group, so during a throttle window a cold start silently falls
+  back to a *subset*, and the map shows (say) only Starlink craft. Nothing in
+  the UI distinguishes the two cases; the admin health page records the
+  failures that caused the fallback.
 - **CelesTrak rate-limits repeated downloads.** Requesting the same GROUP again
   before CelesTrak's data updates returns `403 "GP data has not updated since
   your last successful download"`. A TLE group is now cached on disk and served
@@ -130,6 +138,42 @@ positions computed from them.
   *random synthetic patch* seeded by the object id — there is no real telescope
   imagery in the pipeline. Output is illustrative only.
 
+## Accounts and storage
+
+- **A default `admin` / `admin` login is created on startup.** `_ensure_admin_user`
+  in `api.py` bootstraps it for convenience and deliberately bypasses the
+  minimum-password rule. **This must be removed or gated before the app is
+  reachable by anyone else** — it is an unauthenticated admin account with a
+  guessable password.
+- **Sessions never expire.** The `sessions` table stores a token hash and a
+  creation time but no expiry, and nothing prunes it. A token stays valid until
+  the user logs out, and the table only grows. (`auth.py` returns "invalid or
+  expired token", but nothing can currently expire.)
+- **SQLite is opened per query.** Every `db.*` call opens a new connection, sets
+  its pragmas, and closes it — roughly 37× the cost of a shared connection on
+  repeated reads. Fine at this scale, wasteful at any other.
+- **Not in WAL mode.** `journal_mode` is the default `delete`, so writers block
+  readers. Concurrent writes survive on SQLite's 5s busy timeout rather than by
+  design.
+- **Per-user indexes exist, per-table scans do not.** `user_id` is indexed on
+  every owned table; `sessions.token_hash` and `users.username` are covered by
+  their PRIMARY KEY / UNIQUE constraints.
+
+## Models and publishing
+
+- **Both publishable models are trained on synthetic data.** The classifier
+  learns from generated patches and the trajectory transformer from synthetic
+  linear-motion tracks. `app/model_publish.py` requires every model to carry
+  caveats and prints them on the generated model card, so this cannot be
+  published silently — but it does mean neither model is scientifically useful
+  as shipped.
+- **Nothing is trained by default.** `models/` is absent until you run the
+  training script; the publish CLI fails with a clear error rather than
+  uploading an empty repository.
+- **Publishing is opt-in twice over.** `scripts/publish_model.py` is a dry run
+  unless given `--push`, and creates private repositories unless given
+  `--public`.
+
 ## Environment / tooling
 
 - **macOS x86_64 numpy/TensorFlow dylib fragility.** numpy's bundled
@@ -139,6 +183,13 @@ positions computed from them.
   `pyproject.toml`. If imports break again, rebuild: `rm -rf .venv && uv sync`.
 - **TensorFlow pinned to 2.16.2.** Versions ≥ 2.17 dropped macOS x86_64 wheels;
   2.16.2 is the last release with both Linux and Intel-mac wheels.
+- **Scripts must be run as modules, from the repo root.**
+  `uv run python -m scripts.<name>` works; `uv run python scripts/<name>.py`
+  fails with `ModuleNotFoundError: No module named 'app'`, because running a
+  file directly puts `scripts/` on `sys.path` instead of the project root.
+  Scripts also import `setuptools` before anything TensorFlow-related, for the
+  same distutils reason as `app/api.py`. Model paths are relative, so the repo
+  root is the required working directory either way.
 
 ## Robustness
 
