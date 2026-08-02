@@ -24,6 +24,11 @@ dependencies = [
 ]
 
 [dependency-groups]
+# Only needed to push a model to Hugging Face (scripts/publish_model.py);
+# kept out of the runtime deps so the app and its image stay lean.
+publish = [
+    "huggingface_hub",
+]
 dev = [
     "pytest",
     "pytest-cov",

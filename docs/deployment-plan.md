@@ -13,12 +13,37 @@ the agreed shape to work toward, recorded so the layout doesn't get re-litigated
 
 ## Hugging Face
 
+**Account: https://huggingface.co/daley30** (created 2026-08-02).
+
 | Area | Contents |
 |------|----------|
 | Datasets | Training patches for the object classifier |
 | Model checkpoints | Intermediate training artifacts |
 | Final models | The released classifier + trajectory transformer |
 | Model cards | Provenance, intended use, and limitations for each model |
+
+### What this repo would publish
+
+Two models, both Keras `.keras` files:
+
+| Model | Code | Local output |
+|-------|------|--------------|
+| Object classifier (CNN, 23 classes) | `app/object_classifier.py` | `models/object_classifier/model.keras`, timestamped copies in `models/archive/` |
+| Trajectory transformer | `app/trajectory_transformer.py` | `models/trajectory_transformer/model.keras` |
+
+### Before anything can be uploaded
+
+- **No trained model exists on disk yet.** `models/` is not present; nothing has
+  been trained and saved. `uv run python scripts/train_object_classifier.py`
+  produces the classifier, but it needs a labelled image dataset organised by
+  object slug (see README "Training") — the repo currently only has *synthetic*
+  patches, which are illustrative and not worth publishing as a real model.
+- **The classifier is trained on synthetic data.** `/api/classify/{id}` runs the
+  CNN on a randomly generated patch, not telescope imagery (see
+  [known-issues.md](known-issues.md)). Any model card must say this plainly —
+  publishing it as a working astronomical classifier would be misleading.
+- **Credentials.** Upload needs a HF write token (`huggingface_hub` +
+  `HF_TOKEN`); it should live in the environment, never in the repo.
 
 ## AWS
 

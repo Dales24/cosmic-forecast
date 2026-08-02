@@ -163,10 +163,35 @@ cd front_end && npm test
 > the stdlib. `setuptools<74` (pinned) restores it at runtime, and the root
 > `conftest.py` activates the shim before pytest collects any TF-importing test.
 
+## Publishing a model
+
+Models are pushed to Hugging Face by `scripts/publish_model.py`. It is a **dry
+run by default** — it prints the artifact and the full model card and uploads
+nothing until you pass `--push`.
+
+```bash
+uv sync --group publish            # installs huggingface_hub (not a runtime dep)
+
+# Preview: no token needed, nothing leaves your machine
+uv run python -m scripts.publish_model classifier --repo daley30/cosmic-classifier
+
+# Upload to a private repo
+export HF_TOKEN=hf_...
+uv run python -m scripts.publish_model classifier --repo daley30/cosmic-classifier --push
+
+# Public is opt-in and deliberate — read the card first
+uv run python -m scripts.publish_model classifier --repo daley30/... --push --public
+```
+
+Publishable models are declared in `app/model_publish.py`, each with the
+caveats that must appear on its card. Both current models are trained on
+**synthetic** data, and the card says so — see
+[docs/known-issues.md](docs/known-issues.md).
+
 ## Training
 
 Organize labelled image patches into subdirectories named by object slug (see `app/object_classes.py`) then run:
 
 ```bash
-uv run python scripts/train_object_classifier.py
+uv run python -m scripts.train_object_classifier
 ```
