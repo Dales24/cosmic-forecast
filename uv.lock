@@ -286,7 +286,8 @@ dependencies = [
     { name = "requests" },
     { name = "setuptools" },
     { name = "sgp4" },
-    { name = "tensorflow-cpu" },
+    { name = "tensorflow-cpu", marker = "sys_platform != 'win32'" },
+    { name = "tensorflow-intel", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -296,6 +297,7 @@ dev = [
     { name = "flake8" },
     { name = "httpx" },
     { name = "pre-commit" },
+    { name = "pre-commit-hooks" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -316,7 +318,8 @@ requires-dist = [
     { name = "requests" },
     { name = "setuptools", specifier = "<74" },
     { name = "sgp4" },
-    { name = "tensorflow-cpu", specifier = "==2.16.2" },
+    { name = "tensorflow-cpu", marker = "sys_platform != 'win32'", specifier = "==2.16.2" },
+    { name = "tensorflow-intel", marker = "sys_platform == 'win32'", specifier = "==2.16.2" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 
@@ -326,6 +329,7 @@ dev = [
     { name = "flake8", specifier = "==7.0.0" },
     { name = "httpx" },
     { name = "pre-commit" },
+    { name = "pre-commit-hooks", specifier = "==4.6.0" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -986,6 +990,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pre-commit-hooks"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ruamel-yaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/0d/b4e97cd99b26c0cd8265c9f19ee7e55248142f0c9955e4d119de96fa4a13/pre_commit_hooks-4.6.0.tar.gz", hash = "sha256:eb1f43ee67869cd41b4c59017fad4a0f9d4d61201d163f2135535aaf65035a2b", size = 29579, upload-time = "2024-04-06T18:25:03.093Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/d8/d09b270248bc2441f966dd094a3de8ae813112d2687036f621202bdef80b/pre_commit_hooks-4.6.0-py2.py3-none-any.whl", hash = "sha256:a69199e6a2d45ec59c1020a81ca1549abddc2afb798276d9a0d951752d6abbfe", size = 41193, upload-time = "2024-04-06T18:25:00.547Z" },
+]
+
+[[package]]
 name = "propcache"
 version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1231,6 +1247,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ruamel-yaml"
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz", hash = "sha256:53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993", size = 142709, upload-time = "2026-01-02T16:50:31.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl", hash = "sha256:27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93", size = 118102, upload-time = "2026-01-02T16:50:29.201Z" },
+]
+
+[[package]]
 name = "s3fs"
 version = "2026.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1359,7 +1384,37 @@ dependencies = [
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/e0/6246919d07748f9842ee60fc41a04e45c2f65a1100c9113f408324f545fc/tensorflow_cpu-2.16.2-cp312-cp312-macosx_10_15_x86_64.whl", hash = "sha256:f8d3004d6bfe76fa1f25a01635bcebc743e5eed6f7d6e9c45d9edff4b3c04427", size = 259727621, upload-time = "2024-06-28T18:54:27.5Z" },
     { url = "https://files.pythonhosted.org/packages/99/9e/f3d851053b8a356f8093043c7f92771a9372e6fc40f28d276c702b7a3111/tensorflow_cpu-2.16.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8ec09acc09534017e02318456f77e96947b2ab4d24d2eb580541405c45ea3b70", size = 214170320, upload-time = "2024-06-28T18:54:36.454Z" },
-    { url = "https://files.pythonhosted.org/packages/0e/50/e78570358c06e4fb1affcef280246f83c9b291e6a388cadb8f8b8d43116e/tensorflow_cpu-2.16.2-cp312-cp312-win_amd64.whl", hash = "sha256:11df7d715b42eb5ef13138a75c8744052a05e8b50761606a3ca219943fa2e874", size = 2107, upload-time = "2024-06-28T18:54:42.735Z" },
+]
+
+[[package]]
+name = "tensorflow-intel"
+version = "2.16.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "absl-py" },
+    { name = "astunparse" },
+    { name = "flatbuffers" },
+    { name = "gast" },
+    { name = "google-pasta" },
+    { name = "grpcio" },
+    { name = "h5py" },
+    { name = "keras" },
+    { name = "libclang" },
+    { name = "ml-dtypes" },
+    { name = "numpy" },
+    { name = "opt-einsum" },
+    { name = "packaging" },
+    { name = "protobuf" },
+    { name = "requests" },
+    { name = "setuptools" },
+    { name = "six" },
+    { name = "tensorboard" },
+    { name = "termcolor" },
+    { name = "typing-extensions" },
+    { name = "wrapt" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/7d/d4b381e7a7a0c22179a886a3814a974adfb6edfdde9ef594f55902e4896b/tensorflow_intel-2.16.2-cp312-cp312-win_amd64.whl", hash = "sha256:239af202645145c1c39e7dfe714687e1b1a57a73e5022aacae0313d917f09608", size = 377067160, upload-time = "2024-06-28T19:47:55.663Z" },
 ]
 
 [[package]]
