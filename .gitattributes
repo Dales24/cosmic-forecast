@@ -1,0 +1,10 @@
+# Normalise line endings so a Windows checkout doesn't trip black or the
+# trailing-whitespace / end-of-file-fixer pre-commit hooks.
+* text=auto eol=lf
+
+# Binary assets: never touch.
+*.db binary
+*.tle -text
+*.keras binary
+*.h5 binary
+*.png binary

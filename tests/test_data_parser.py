@@ -1,12 +1,16 @@
 """Tests for app/data_parser.py — routing, parsing, and mocked HTTP calls."""
 
+import os
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.data_parser import (
+    _TLE_CACHE_TTL_SECONDS,
     _parse_tle_text,
     fetch_celestrak,
+    fetch_celestrak_text,
     fetch_jpl,
     fetch_simbad,
     get_data,
@@ -73,22 +77,31 @@ def _mock_response(text=""):
     return resp
 
 
-def test_fetch_celestrak_satellite_calls_correct_url():
-    with patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock:
+def test_fetch_celestrak_satellite_calls_correct_url(tmp_path):
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+    ):
         fetch_celestrak("satellite", limit=1)
     url = mock.call_args[0][0]
     assert "active" in url
 
 
-def test_fetch_celestrak_iss_calls_stations_url():
-    with patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock:
+def test_fetch_celestrak_iss_calls_stations_url(tmp_path):
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+    ):
         fetch_celestrak("iss", limit=1)
     url = mock.call_args[0][0]
     assert "stations" in url
 
 
-def test_fetch_celestrak_parses_response():
-    with patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)):
+def test_fetch_celestrak_parses_response(tmp_path):
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
         result = fetch_celestrak("satellite", limit=5)
     assert len(result) == 1
     assert result[0]["name"] == "ISS (ZARYA)"
@@ -97,6 +110,88 @@ def test_fetch_celestrak_parses_response():
 def test_fetch_celestrak_unknown_slug_raises():
     with pytest.raises(ValueError, match="No CelesTrak URL"):
         fetch_celestrak("nonexistent_slug")
+
+
+def _age_tle_cache(tmp_path, slug, seconds):
+    """Backdate a cached group's mtime so it reads as `seconds` old."""
+    path = tmp_path / f"{slug}.tle"
+    stale = time.time() - seconds
+    os.utime(path, (stale, stale))
+
+
+def test_fetch_celestrak_text_caches_and_falls_back(tmp_path):
+    # A successful download populates the on-disk cache...
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
+        assert fetch_celestrak_text("satellite") == _ISS_TLE
+
+    # ...so when CelesTrak later 403s (unchanged group), the cache is served.
+    # Age it past the TTL first, or the fallback path is never reached.
+    _age_tle_cache(tmp_path, "satellite", _TLE_CACHE_TTL_SECONDS + 1)
+    failing = MagicMock()
+    failing.raise_for_status.side_effect = Exception("403 not updated")
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=failing),
+    ):
+        assert fetch_celestrak_text("satellite") == _ISS_TLE
+
+
+def test_fetch_celestrak_text_serves_fresh_cache_without_network(tmp_path):
+    """CelesTrak republishes only every ~2h, so a fresh cache skips the fetch."""
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
+        fetch_celestrak_text("satellite")
+
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get") as mock_get,
+    ):
+        assert fetch_celestrak_text("satellite") == _ISS_TLE
+    mock_get.assert_not_called()
+
+
+def test_fetch_celestrak_text_refetches_once_the_cache_goes_stale(tmp_path):
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
+        fetch_celestrak_text("satellite")
+
+    _age_tle_cache(tmp_path, "satellite", _TLE_CACHE_TTL_SECONDS + 1)
+    updated = _ISS_TLE.replace("ISS (ZARYA)", "ISS (UPDATED)")
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(updated)),
+    ):
+        assert fetch_celestrak_text("satellite") == updated
+
+
+def test_fetch_celestrak_text_raises_when_no_cache(tmp_path):
+    failing = MagicMock()
+    failing.raise_for_status.side_effect = Exception("boom")
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=failing),
+    ):
+        with pytest.raises(Exception):
+            fetch_celestrak_text("satellite")
+
+
+def test_fetch_celestrak_rocket_body_queries_by_name(tmp_path):
+    # CelesTrak has no rocket-body GROUP; it must query by the "R/B" name suffix.
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+    ):
+        fetch_celestrak("rocket_body", limit=1)
+    url = mock.call_args[0][0]
+    assert "NAME=R/B" in url
+    assert "rocket-bodies" not in url
 
 
 def test_fetch_celestrak_respects_limit():
@@ -144,6 +239,29 @@ def test_fetch_jpl_default_date_is_now():
     assert params["date-min"] == "now"
 
 
+def _jpl_params(date):
+    with patch("app.data_parser.requests.get", return_value=_jpl_response()) as mock:
+        fetch_jpl(date=date, limit=5)
+    return mock.call_args[1]["params"]
+
+
+def test_fetch_jpl_window_ends_relative_to_the_requested_date():
+    """CAD reads "+30" as 30 days from today, which is the wrong window for
+    any other date — a future date would search an empty range."""
+    assert _jpl_params("2026-12-25")["date-max"] == "2027-01-24"
+    assert _jpl_params("2020-01-01")["date-max"] == "2020-01-31"
+
+
+def test_fetch_jpl_window_stays_relative_for_now():
+    assert _jpl_params(None)["date-max"] == "+30"
+    assert _jpl_params("now")["date-max"] == "+30"
+
+
+def test_fetch_jpl_window_tolerates_a_datetime_or_malformed_date():
+    assert _jpl_params("2026-12-25T13:45:00Z")["date-max"] == "2027-01-24"
+    assert _jpl_params("not-a-date")["date-max"] == "+30"
+
+
 def test_fetch_jpl_empty_data():
     resp = _jpl_response(data=[])
     with patch("app.data_parser.requests.get", return_value=resp):
@@ -180,6 +298,16 @@ def test_fetch_simbad_includes_adql_query():
     assert "G" in params["QUERY"]
 
 
+def test_fetch_simbad_uses_equality_not_like():
+    # SIMBAD's otype column rejects LIKE ("LIKE not supported on otype"); the
+    # query must use exact equality. Regression guard for that fix.
+    with patch("app.data_parser.requests.get", return_value=_simbad_response()) as mock:
+        fetch_simbad("galaxy", limit=5)
+    query = mock.call_args[1]["params"]["QUERY"]
+    assert "otype = 'G'" in query
+    assert "LIKE" not in query.upper()
+
+
 def test_fetch_simbad_unknown_slug_raises():
     with pytest.raises(ValueError, match="No SIMBAD otype"):
         fetch_simbad("not_a_real_type")
@@ -190,6 +318,22 @@ def test_fetch_simbad_nebula_slug():
         fetch_simbad("nebula", limit=3)
     query = mock.call_args[1]["params"]["QUERY"]
     assert "PN" in query
+
+
+@pytest.mark.parametrize(
+    "slug,otype",
+    [
+        ("star", "*"),
+        ("black_hole", "BH"),
+        ("quasar", "QSO"),
+        ("pulsar", "Psr"),
+        ("supernova_remnant", "SNR"),
+    ],
+)
+def test_fetch_simbad_deep_space_pack_otypes(slug, otype):
+    with patch("app.data_parser.requests.get", return_value=_simbad_response()) as mock:
+        fetch_simbad(slug, limit=2)
+    assert otype in mock.call_args[1]["params"]["QUERY"]
 
 
 # ── get_data routing ──────────────────────────────────────────────────────────
@@ -211,7 +355,20 @@ def test_get_data_jpl_slugs_route_correctly(slug):
     mock.assert_called_once_with("2025-01-01", 10)
 
 
-@pytest.mark.parametrize("slug", ["galaxy", "nebula", "star_cluster", "variable_star"])
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "galaxy",
+        "nebula",
+        "star_cluster",
+        "variable_star",
+        "star",
+        "black_hole",
+        "quasar",
+        "pulsar",
+        "supernova_remnant",
+    ],
+)
 def test_get_data_simbad_slugs_route_correctly(slug):
     with patch("app.data_parser.fetch_simbad", return_value=[]) as mock:
         get_data(slug, limit=7)

@@ -5,9 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cosmic Forecast</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/config.js"></script>
 </head>
 <body>
   <canvas id="space-map" aria-label="Space orbital map"></canvas>
+
+  <!-- Top-left navigation -->
+  <nav class="top-nav">
+    <a href="/help">Help</a>
+    <a href="/profile">Profile</a>
+  </nav>
 
   <!-- Account bar (populated by auth.js) -->
   <div id="auth-bar" class="auth-bar"></div>
@@ -26,6 +33,17 @@
       <div class="controls">
         <button id="play-btn">&#9654; Play Simulation</button>
         <div id="sim-time">T+0h 00m 00s</div>
+      </div>
+
+      <div class="theme-switch" id="theme-switch">
+        <label class="theme-switch-label" for="theme-select">Theme</label>
+        <select id="theme-select" class="theme-select" aria-label="UI theme">
+          <option value="default">Default</option>
+          <option value="cosmic">Purple Cosmic</option>
+          <option value="vangogh">Van Gogh</option>
+          <option value="burton">Tim Burton</option>
+          <option value="pirate">Pirate</option>
+        </select>
       </div>
     </div>
 
@@ -52,10 +70,37 @@
           <label for="obs_datetime">Observation Date &amp; Time (UTC)</label>
           <input id="obs_datetime" type="datetime-local" name="obs_datetime">
 
-          <input type="submit" value="Load Scene">
+          <div class="form-actions">
+            <input type="submit" value="Load Scene">
+            <button type="button" id="clear-search" class="secondary-btn">Clear</button>
+          </div>
         </form>
 
         <div id="scene-result"></div>
+
+        <div class="section-divider"></div>
+
+        <div class="add-object">
+          <h3 class="upload-title">Add Object to Scene</h3>
+          <form id="add-object-form">
+            <label for="add-name">Name</label>
+            <input id="add-name" type="text" placeholder="e.g. My Probe" required>
+            <div class="coord-row">
+              <div>
+                <label for="add-kind">Type</label>
+                <select id="add-kind" class="theme-select"></select>
+              </div>
+              <div>
+                <label for="add-band">Distance</label>
+                <select id="add-band" class="theme-select"></select>
+              </div>
+            </div>
+            <label for="add-ra">Direction — Right Ascension (0–360°)</label>
+            <input id="add-ra" type="number" min="0" max="360" step="1" value="90">
+            <input type="submit" value="✦ Add Object">
+          </form>
+          <p class="add-object-note" id="add-object-note"></p>
+        </div>
 
         <div class="section-divider"></div>
 
@@ -160,6 +205,13 @@
             <span class="key">Type</span>
             <span class="val" id="obj-kind">&#8212;</span>
           </div>
+        </div>
+
+        <div class="obj-section" id="obj-about">
+          <div class="obj-section-title">About</div>
+          <p class="obj-desc" id="obj-desc"></p>
+          <!-- Placeholder link — point at a real per-object info source later. -->
+          <a class="obj-info-link" id="obj-info-link" href="#" rel="noopener">Further info &rarr;</a>
         </div>
 
         <p class="hint">Press <strong>&#9654; Play Simulation</strong> to fast-forward paths and see ML-predicted trajectories.</p>

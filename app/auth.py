@@ -9,16 +9,23 @@ tokens.
 
 import hashlib
 import hmac
+import os
 import secrets
 from typing import Optional
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 from app import db
 
 _PBKDF2_ROUNDS = 100_000
 _MIN_USERNAME = 3
 _MIN_PASSWORD = 8
+
+
+def admin_usernames() -> set:
+    """Usernames granted admin, from the COSMIC_ADMIN_USERS env var (comma-list)."""
+    raw = os.environ.get("COSMIC_ADMIN_USERS", "")
+    return {name.strip().lower() for name in raw.split(",") if name.strip()}
 
 
 def hash_password(password: str, salt: Optional[str] = None) -> tuple:
@@ -58,8 +65,9 @@ def register(username: str, password: str, email: Optional[str] = None) -> dict:
     if db.get_user_by_username(username):
         raise HTTPException(409, "username already taken")
     pw_hash, salt = hash_password(password)
-    user_id = db.create_user(username, email, pw_hash, salt)
-    return {"id": user_id, "username": username}
+    is_admin = username.lower() in admin_usernames()
+    user_id = db.create_user(username, email, pw_hash, salt, is_admin=is_admin)
+    return {"id": user_id, "username": username, "is_admin": is_admin}
 
 
 def login(username: str, password: str) -> str:
@@ -93,4 +101,11 @@ def current_user(authorization: str = Header(default="")):
     user = db.get_user_by_token(token_hash(token))
     if not user:
         raise HTTPException(401, "invalid or expired token")
+    return user
+
+
+def require_admin(user=Depends(current_user)):
+    """FastAPI dependency: like current_user, but 403 unless the user is admin."""
+    if not user["is_admin"]:
+        raise HTTPException(403, "admin access required")
     return user

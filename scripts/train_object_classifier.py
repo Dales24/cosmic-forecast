@@ -7,6 +7,11 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+# TensorFlow reaches for the stdlib `distutils`, which Python 3.12 removed;
+# importing setuptools first restores the shim. Must precede any tensorflow
+# import (app.object_classifier pulls it in). Same reason as app/api.py.
+import setuptools  # noqa: F401
+
 from app.object_classifier import (
     DEFAULT_MODEL_DIR,
     create_cnn_model,

@@ -101,6 +101,32 @@ def load_image_dataset(data_dir: str | Path, validation_split: float = 0.2):
     return train_ds, val_ds
 
 
+def _class_base_color(class_index: int) -> np.ndarray:
+    """A stable, class-specific base RGB colour (the signal each class carries)."""
+    return np.random.default_rng(1000 + class_index).integers(
+        20, 80, size=3, dtype=np.int16
+    )
+
+
+def synthetic_patch(slug: str, seed: int = 0) -> np.ndarray:
+    """A single synthetic RGB patch characteristic of `slug`'s class.
+
+    Shared by the training set and by live classification so that a patch
+    generated for a kind is classified as that kind by the trained model.
+    """
+    class_index = SLUG_TO_INDEX[slug]
+    rng = np.random.default_rng(seed)
+    base = _class_base_color(class_index)
+    noise = rng.integers(-15, 16, size=(*PATCH_SIZE, 3), dtype=np.int16)
+    patch = np.clip(base + noise, 0, 255).astype(np.uint8)
+    if slug in {"galaxy", "nebula", "star_cluster"}:
+        patch = np.clip(patch.astype(np.int16) + 40, 0, 255).astype(np.uint8)
+    elif slug in {"satellite", "iss", "rocket_body"}:
+        mid_r, mid_c = PATCH_SIZE[0] // 2, PATCH_SIZE[1] // 2
+        patch[mid_r - 2 : mid_r + 2, mid_c - 2 : mid_c + 2] = 255
+    return patch
+
+
 def generate_synthetic_dataset(
     samples_per_class: int = 32,
     seed: int = 42,
@@ -109,22 +135,10 @@ def generate_synthetic_dataset(
     rng = np.random.default_rng(seed)
     images = []
     labels = []
-
     for class_index, slug in enumerate(CLASS_SLUGS):
-        base = rng.integers(20, 80, size=(3,), dtype=np.uint8)
-        for sample in range(samples_per_class):
-            noise = rng.integers(-15, 16, size=(*PATCH_SIZE, 3), dtype=np.int16)
-            patch = np.clip(base + noise + sample, 0, 255).astype(np.uint8)
-            if slug in {"galaxy", "nebula", "star_cluster"}:
-                patch = np.clip(patch.astype(np.int16) + 40, 0, 255).astype(np.uint8)
-            elif slug in {"satellite", "iss", "rocket_body"}:
-                patch[
-                    PATCH_SIZE[0] // 2 - 2 : PATCH_SIZE[0] // 2 + 2,
-                    PATCH_SIZE[1] // 2 - 2 : PATCH_SIZE[1] // 2 + 2,
-                ] = 255
-            images.append(patch)
+        for _ in range(samples_per_class):
+            images.append(synthetic_patch(slug, seed=int(rng.integers(0, 2**31))))
             labels.append(class_index)
-
     return np.stack(images), np.array(labels, dtype=np.int32)
 
 

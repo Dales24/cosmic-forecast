@@ -5,6 +5,11 @@ import json
 
 import numpy as np
 
+# TensorFlow reaches for the stdlib `distutils`, which Python 3.12 removed;
+# importing setuptools first restores the shim. Must precede any tensorflow
+# import (app.object_classifier pulls it in). Same reason as app/api.py.
+import setuptools  # noqa: F401
+
 from app.object_classifier import generate_synthetic_dataset
 from app.pipeline import FrameInput, create_default_pipeline
 

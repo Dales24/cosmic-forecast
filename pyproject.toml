@@ -9,7 +9,11 @@ dependencies = [
     "aiofiles",
     "numpy",
     # 2.17+ dropped macOS x86_64 wheels; pin to the last cross-platform release.
-    "tensorflow-cpu==2.16.2",
+    # On Windows the `tensorflow-cpu` wheel is a 2 KB shim that pulls in
+    # `tensorflow-intel` (the package that actually carries the binaries), so
+    # depend on it directly there — the marker keeps macOS/Linux unchanged.
+    "tensorflow-cpu==2.16.2; sys_platform != 'win32'",
+    "tensorflow-intel==2.16.2; sys_platform == 'win32'",
     "pandas",
     "earthaccess",
     "h5py",
@@ -24,13 +28,21 @@ dependencies = [
 ]
 
 [dependency-groups]
+# Only needed to push a model to Hugging Face (scripts/publish_model.py);
+# kept out of the runtime deps so the app and its image stay lean.
+publish = [
+    "huggingface_hub",
+]
 dev = [
     "pytest",
     "pytest-cov",
     "httpx",  # required by fastapi/starlette TestClient in tests/test_api.py
-    "black==24.4.2",  # match the pinned pre-commit hook
-    "flake8==7.0.0",  # match the pinned pre-commit hook
+    "black==24.4.2",  # keep in sync with .pre-commit-config.yaml
+    "flake8==7.0.0",  # keep in sync with .pre-commit-config.yaml
     "pre-commit",
+    # Hooks run from this venv rather than pre-commit-managed venvs, so the
+    # utilities have to be installed here. Pinned to the former hook `rev`.
+    "pre-commit-hooks==4.6.0",
 ]
 
 # Application, not a distributable package — skip the build step.

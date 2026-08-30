@@ -23,7 +23,7 @@ from app.trajectory_transformer import (
     train_trajectory_model,
 )
 
-_RANDOM_CHANCE = 1.0 / NUM_CLASSES  # ~0.071 for 14 classes
+_RANDOM_CHANCE = 1.0 / NUM_CLASSES  # chance level for NUM_CLASSES
 
 
 def _classifier_holdout_accuracy(samples_per_class=16, epochs=12, seed=0):

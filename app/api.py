@@ -1,16 +1,26 @@
+# TensorFlow (imported lazily by the CNN/forecast modules) reaches for the
+# stdlib `distutils`, which Python 3.12 removed; importing setuptools first
+# restores the compatibility shim. Must precede any tensorflow import.
+import setuptools  # noqa: F401
+
+import logging
 import sys
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from math import cos, pi, sin
+from functools import partial
+from math import acos, asin, atan2, cos, degrees, log10, pi, radians, sin, sqrt
+from typing import Iterator, NamedTuple
 
 import numpy as np
-import requests as _requests
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, db
+from app import auth, config, db
 
 # Add project root so `app.*` imports work when run from app/ directory
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +31,34 @@ if _root not in sys.path:
 _front_end = os.path.join(_root, "front_end")
 
 app = FastAPI(title="Cosmic Forecast")
+log = logging.getLogger(__name__)
+
+# Compress text responses (JS/CSS/HTML/JSON) over ~1 KB — the 64 KB app.js and
+# 21 KB stylesheet shrink by roughly 70% on the wire.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+# ── Request metrics (for the admin health monitor) ────────────────────────────
+@app.middleware("http")
+async def _record_metrics(request, call_next):
+    from app.metrics import metrics
+
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        metrics.record(
+            request.method, request.url.path, 500, (time.perf_counter() - start) * 1000
+        )
+        raise
+    metrics.record(
+        request.method,
+        request.url.path,
+        response.status_code,
+        (time.perf_counter() - start) * 1000,
+    )
+    return response
+
 
 # ── Lazy CNN state ────────────────────────────────────────────────────────────
 _cnn_model = None
@@ -29,15 +67,59 @@ _cnn_model = None
 def _get_cnn():
     global _cnn_model
     if _cnn_model is None:
-        from app.object_classifier import create_cnn_model
+        from app.object_classifier import (
+            create_cnn_model,
+            generate_synthetic_dataset,
+            train_model,
+        )
 
-        _cnn_model = create_cnn_model()
+        # Train once on the synthetic dataset so predictions are actually
+        # discriminative — an untrained net collapses to a single class.
+        model = create_cnn_model()
+        images, labels = generate_synthetic_dataset(samples_per_class=24)
+        train_model(model, images, labels, epochs=8)
+        _cnn_model = model
     return _cnn_model
 
 
+# ── Unified scene scale ───────────────────────────────────────────────────────
+# Everything shares one map: Earth at the centre (radius 0), the deep sky at the
+# rim. Because a LEO satellite and a galaxy can't share a *linear* distance
+# scale, the radius grows with the log of geocentric distance, so LEO, GEO, the
+# Moon, the planets, and the deep sky fall into successive bands. Direction
+# (angle) is always the object's real geocentric right ascension.
+_R_INNER = 0.10
+_R_OUTER = 0.90
+_LOG_D_MIN = log10(6.6e3)  # ~Earth's surface / lowest LEO, km
+_LOG_D_MAX = log10(4.6e9)  # ~Neptune at its farthest, km
+_DEEP_SKY_RADIUS = 0.95  # galaxies etc.: direction is real, distance is "far"
+_AU_KM = 149_597_870.7
+
+
+def _scene_radius(distance_km: float) -> float:
+    """Map a real geocentric distance (km) onto the map's radial scale (log)."""
+    if distance_km <= 0:
+        return _R_INNER
+    frac = (log10(distance_km) - _LOG_D_MIN) / (_LOG_D_MAX - _LOG_D_MIN)
+    frac = max(0.0, min(1.0, frac))
+    return _R_INNER + frac * (_R_OUTER - _R_INNER)
+
+
 # ── TLE position propagation ──────────────────────────────────────────────────
-_NORM_KM = 42164.0  # GEO distance — normalises LEO at ~0.16, GPS at ~0.63
-_CELESTRAK_GP = "https://celestrak.org/NORAD/elements/gp.php"
+def _iter_tle_sets(tle_text: str) -> Iterator[tuple[str, str, str]]:
+    """Yield (name, line1, line2) for every well-formed TLE set in the text."""
+    lines = [ln.strip() for ln in tle_text.splitlines() if ln.strip()]
+    i = 0
+    while i < len(lines):
+        if (
+            i + 2 < len(lines)
+            and lines[i + 1].startswith("1 ")
+            and lines[i + 2].startswith("2 ")
+        ):
+            yield lines[i], lines[i + 1], lines[i + 2]
+            i += 3
+        else:
+            i += 1
 
 
 def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[dict]:
@@ -46,69 +128,163 @@ def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[
     except ImportError:
         return []
 
-    lines = [ln.strip() for ln in tle_text.splitlines() if ln.strip()]
     results: list[dict] = []
-    i = 0
-    while i < len(lines) and len(results) < limit:
-        if (
-            i + 2 < len(lines)
-            and lines[i + 1].startswith("1 ")
-            and lines[i + 2].startswith("2 ")
-        ):
-            name, l1, l2 = lines[i], lines[i + 1], lines[i + 2]
-            try:
-                sat = Satrec.twoline2rv(l1, l2)
-                jd, fr = sgp4_jday(
-                    dt.year,
-                    dt.month,
-                    dt.day,
-                    dt.hour,
-                    dt.minute,
-                    dt.second + dt.microsecond / 1e6,
-                )
-                e, r, v = sat.sgp4(jd, fr)
-                if e == 0 and r:
-                    results.append(
-                        {
-                            "id": l1[2:7].strip(),
-                            "name": name,
-                            "kind": kind,
-                            "x_norm": r[0] / _NORM_KM,
-                            "y_norm": r[1] / _NORM_KM,
-                            "vx_norm": v[0] / _NORM_KM,
-                            "vy_norm": v[1] / _NORM_KM,
-                            "source": "celestrak",
-                        }
-                    )
-            except Exception:
-                pass
-            i += 3
-        else:
-            i += 1
+    for name, l1, l2 in _iter_tle_sets(tle_text):
+        if len(results) >= limit:
+            break
+        try:
+            sat = Satrec.twoline2rv(l1, l2)
+            jd, fr = sgp4_jday(
+                dt.year,
+                dt.month,
+                dt.day,
+                dt.hour,
+                dt.minute,
+                dt.second + dt.microsecond / 1e6,
+            )
+            err, r, v = sat.sgp4(jd, fr)
+            if err == 0 and r:
+                results.append(_tle_scene_object(l1[2:7].strip(), name, kind, r, v))
+        except Exception:
+            pass
     return results
 
 
-# ── Catalog objects (JPL / SIMBAD) ────────────────────────────────────────────
-# These sources don't share the TLE orbital frame, so scene positions are
-# symbolic, not astrometric (see docs/known-issues.md).
+def _tle_scene_object(obj_id: str, name: str, kind: str, r, v) -> dict:
+    """Place a propagated satellite by real direction + log-scaled distance.
+
+    Angle is the object's real position angle in the equatorial (ECI) plane;
+    radius comes from its true geocentric distance. Velocity is expressed as the
+    orbit's real angular rate so the animation sweeps it around at the right pace.
+    """
+    x, y, z = r[0], r[1], r[2]
+    distance_km = sqrt(x * x + y * y + z * z)
+    angle = atan2(y, x)
+    radius = _scene_radius(distance_km)
+    r2 = x * x + y * y
+    omega = (x * v[1] - y * v[0]) / r2 if r2 else 0.0  # real angular rate, rad/s
+    return {
+        "id": obj_id,
+        "name": name,
+        "kind": kind,
+        "x_norm": radius * cos(angle),
+        "y_norm": radius * sin(angle),
+        "vx_norm": -radius * omega * sin(angle),
+        "vy_norm": radius * omega * cos(angle),
+        "speed_kms": sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2),
+        "source": "celestrak",
+        # ECI direction is the object's real sky position, so it is searchable.
+        "ra_deg": degrees(angle) % 360.0,
+        "dec_deg": degrees(asin(z / distance_km)) if distance_km else 0.0,
+    }
+
+
+# ── Source failure reporting ──────────────────────────────────────────────────
+def _source_unavailable(source: str, kind: str, exc: Exception) -> "CappedObjects":
+    """Log a catalog failure and return the empty result the scene falls back to.
+
+    One source failing must never crash the scene (see claude.md §3), but
+    degrading in total silence makes an outage indistinguishable from a sky with
+    nothing in it. Every fetch failure goes through here so it lands in the log
+    and in the admin health monitor.
+    """
+    from app.metrics import source_failures
+
+    log.warning("%s fetch failed for %s: %s", source, kind, exc)
+    source_failures.record(source, kind, str(exc))
+    return CappedObjects([], 0, True)
+
+
+# ── Catalog result cache ──────────────────────────────────────────────────────
+# The scene cache alone is keyed by the exact datetime, so every new minute
+# refetched all eight catalogs. Most of that work doesn't depend on the minute:
+# SIMBAD's deep-space objects are fixed on the sim's timescale, and JPL's
+# close-approach list only changes by date. Cache each on its own real inputs.
+_SIMBAD_TTL_SECONDS = 6 * 60 * 60
+_JPL_TTL_SECONDS = 60 * 60
+_catalog_cache: dict[tuple, tuple[float, "CappedObjects"]] = {}
+
+
+def _clear_catalog_cache() -> None:
+    _catalog_cache.clear()
+
+
+def _cached_catalog(key: tuple, ttl: float, fetch) -> "CappedObjects":
+    """Memoize one catalog fetch under `key` for `ttl` seconds.
+
+    Called from the scene's thread pool; a race just means two threads fetch
+    the same catalog once, which is harmless.
+    """
+    cached = _catalog_cache.get(key)
+    if cached and (time.time() - cached[0]) < ttl:
+        return cached[1]
+    result = fetch()
+    _catalog_cache[key] = (time.time(), result)
+    return result
+
+
+# ── Capped catalog sources ────────────────────────────────────────────────────
+# Every external catalog is capped per kind (see app.config) so one source can't
+# swamp the map. Each capped source reports what its cap left out, which the
+# admin monitor surfaces.
+class CappedObjects(NamedTuple):
+    """One catalog's scene objects plus how many its cap kept out."""
+
+    objects: list[dict]
+    hidden: int  # objects the cap excluded; 0 when nothing was dropped
+    hidden_exact: bool  # False when `hidden` is a "there are more" floor
+
+
+def _probe_cap(cap: int) -> int:
+    """Ask a query-side source for one extra record, to detect a truncated result.
+
+    JPL and SIMBAD apply the cap in the query itself, so a full page is
+    indistinguishable from an exact fit unless we ask for one more than we show.
+    """
+    return cap + 1 if cap > 0 else 0
+
+
+def _capped_by_probe(records: list, cap: int) -> tuple[list, int, bool]:
+    """Trim a probe result (`cap` + 1 records) back to the cap.
+
+    Returns the kept records plus how many were hidden: an exact 0 when the
+    source had no more to give, otherwise a floor of 1 (the probe record).
+    """
+    if len(records) > cap:
+        return records[:cap], 1, False
+    return records, 0, True
+
+
+# ── Near-Earth objects (JPL) ──────────────────────────────────────────────────
+# The CAD API gives a real approach distance and speed but no on-sky position,
+# so the radius is real (from the distance) while the angle is a deterministic
+# placeholder — the one direction we can't source (see docs/known-issues.md).
 def _stable_angle(seed: str) -> float:
     """Deterministic angle in radians from a string (Python's hash() is salted)."""
     return (sum(ord(char) for char in seed) % 360) * pi / 180.0
 
 
-def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
+def _jpl_scene_objects(date_str: str, cap: int) -> CappedObjects:
     """Near-Earth approaches (JPL CAD) as scene objects for the user's date.
 
-    CAD gives approach distance/velocity but no on-sky position, so each object
-    is placed symbolically: distance sets an outer-ring radius, a stable hash of
-    the designation sets the angle.
+    The approach *distance* is real and sets the object's radius on the shared
+    scale; the direction is a deterministic placeholder (CAD gives no position).
     """
+    return _cached_catalog(
+        ("jpl", date_str, cap),
+        _JPL_TTL_SECONDS,
+        lambda: _fetch_jpl_objects(date_str, cap),
+    )
+
+
+def _fetch_jpl_objects(date_str: str, cap: int) -> CappedObjects:
     from app.data_parser import fetch_jpl
 
     try:
-        records = fetch_jpl(date_str, limit)
-    except Exception:
-        return []
+        records = fetch_jpl(date_str, _probe_cap(cap))
+    except Exception as exc:
+        return _source_unavailable("jpl", "near_earth_object", exc)
+    records, hidden, hidden_exact = _capped_by_probe(records, cap)
 
     objects: list[dict] = []
     for record in records:
@@ -117,8 +293,12 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
             dist_au = float(record.get("dist", 0.0))
         except (TypeError, ValueError):
             dist_au = 0.0
+        try:
+            speed_kms = float(record.get("v_rel", 0.0))
+        except (TypeError, ValueError):
+            speed_kms = 0.0
         angle = _stable_angle(designation)
-        radius = 0.6 + min(dist_au / 0.2, 1.0) * 0.35  # 0.2 AU = CAD dist-max
+        radius = _scene_radius(dist_au * _AU_KM)
         objects.append(
             {
                 "id": f"NEO-{designation}",
@@ -128,24 +308,70 @@ def _jpl_scene_objects(date_str: str, limit: int) -> list[dict]:
                 "y_norm": radius * sin(angle),
                 "vx_norm": 0.0,
                 "vy_norm": 0.0,
+                "speed_kms": speed_kms,
                 "source": "jpl",
             }
         )
-    return objects
+    return CappedObjects(objects, hidden, hidden_exact)
 
 
-def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
-    """SIMBAD deep-space objects placed by sky coordinates (RA/Dec).
+# Deep-space kinds pulled into every scene from SIMBAD (the kind is also the
+# catalog slug). Orbital (TLE) kinds pulled from CelesTrak. Caps: app.config.
+_DEEP_SPACE_KINDS = [
+    "galaxy",
+    "nebula",
+    "star",
+    "black_hole",
+    "quasar",
+    "pulsar",
+    "supernova_remnant",
+]
+_TLE_SCENE_KINDS = ["iss", "satellite", "space_debris", "rocket_body"]
+# Every kind a scene caps, in fetch order (JPL's near-Earth leg sits between).
+_CAPPED_SCENE_KINDS = [*_TLE_SCENE_KINDS, "near_earth_object", *_DEEP_SPACE_KINDS]
 
-    RA (0–360°) maps to x and Dec (−90–90°) to y. These objects are fixed over
-    the simulation's timescale, so velocity is zero.
+
+def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects:
+    """Fetch a CelesTrak group's TLEs (disk-cached) and propagate them to `dt`.
+
+    CelesTrak serves the whole group in one download, so the hidden count here
+    is exact: everything past the cap in that text.
     """
+    if cap <= 0:
+        return CappedObjects([], 0, True)
+    from app.data_parser import fetch_celestrak_text
+
+    try:
+        tle_text = fetch_celestrak_text(kind)
+    except Exception as exc:
+        return _source_unavailable("celestrak", kind, exc)
+    available = sum(1 for _ in _iter_tle_sets(tle_text))
+    objects = _propagate_tles(tle_text, dt, limit=cap, kind=kind)
+    return CappedObjects(objects, max(0, available - cap), True)
+
+
+def _simbad_scene_objects(kind: str, cap: int) -> CappedObjects:
+    """SIMBAD deep-space objects placed by real sky direction.
+
+    Right ascension gives the real angle on the map; the (astronomically vast)
+    distance puts them all on the outer sky band, spread slightly by declination.
+    They are fixed over the simulation's timescale, so velocity is zero.
+    """
+    return _cached_catalog(
+        ("simbad", kind, cap),
+        _SIMBAD_TTL_SECONDS,
+        lambda: _fetch_simbad_objects(kind, cap),
+    )
+
+
+def _fetch_simbad_objects(kind: str, cap: int) -> CappedObjects:
     from app.data_parser import fetch_simbad
 
     try:
-        records = fetch_simbad(slug, limit)
-    except Exception:
-        return []
+        records = fetch_simbad(kind, _probe_cap(cap))
+    except Exception as exc:
+        return _source_unavailable("simbad", kind, exc)
+    records, hidden, hidden_exact = _capped_by_probe(records, cap)
 
     objects: list[dict] = []
     for record in records:
@@ -154,20 +380,171 @@ def _simbad_scene_objects(slug: str, kind: str, limit: int) -> list[dict]:
             dec = float(record.get("dec"))
         except (TypeError, ValueError):
             continue
-        name = str(record.get("main_id", slug))
+        name = str(record.get("main_id", kind))
+        angle = ra * pi / 180.0  # real right ascension
+        radius = _DEEP_SKY_RADIUS - (abs(dec) / 90.0) * 0.06  # spread by declination
         objects.append(
             {
                 "id": f"{kind}-{name}",
                 "name": name,
                 "kind": kind,
-                "x_norm": (ra / 180.0 - 1.0) * 0.9,
-                "y_norm": (dec / 90.0) * 0.9,
+                "x_norm": radius * cos(angle),
+                "y_norm": radius * sin(angle),
                 "vx_norm": 0.0,
                 "vy_norm": 0.0,
+                "speed_kms": 0.0,
                 "source": "simbad",
+                "ra_deg": ra % 360.0,
+                "dec_deg": dec,
+            }
+        )
+    return CappedObjects(objects, hidden, hidden_exact)
+
+
+# ── Solar-system bodies (real ephemeris) ──────────────────────────────────────
+# Real geocentric positions come from app.ephemeris: right ascension gives the
+# real angle on the map, distance sets the radius on the shared scale. `speed_kms`
+# is the mean orbital speed shown in the panel.
+# Each row: (name, speed_kms, description).
+_PLANETS = [
+    (
+        "Mercury",
+        47.4,
+        "Smallest planet and closest to the Sun; a cratered, airless world of extreme temperature swings.",
+    ),  # noqa: E501
+    (
+        "Venus",
+        35.0,
+        "A runaway greenhouse under thick clouds of sulfuric acid — the hottest surface in the solar system.",
+    ),  # noqa: E501
+    (
+        "Mars",
+        24.1,
+        "The red planet; a cold desert world with the tallest volcano and deepest canyon in the solar system.",
+    ),  # noqa: E501
+    (
+        "Jupiter",
+        13.1,
+        "Largest planet; a gas giant with a centuries-old storm, the Great Red Spot, and dozens of moons.",
+    ),  # noqa: E501
+    (
+        "Saturn",
+        9.7,
+        "A gas giant famed for its brilliant, wide ring system of ice and rock.",
+    ),  # noqa: E501
+    (
+        "Uranus",
+        6.8,
+        "An ice giant tipped on its side, orbiting the Sun at a near-right angle.",
+    ),  # noqa: E501
+    (
+        "Neptune",
+        5.4,
+        "The farthest planet; a deep-blue ice giant with the fastest winds in the solar system.",
+    ),  # noqa: E501
+]
+
+
+def _radec_scene_xy(ra_rad: float, distance_km: float) -> tuple[float, float]:
+    """Scene x/y for a body at a real right ascension and geocentric distance."""
+    radius = _scene_radius(distance_km)
+    return radius * cos(ra_rad), radius * sin(ra_rad)
+
+
+def _planet_scene_objects(dt: datetime) -> list[dict]:
+    """The planets at their real geocentric positions for `dt`."""
+    from app import ephemeris
+
+    objects: list[dict] = []
+    for name, speed_kms, description in _PLANETS:
+        ra, dec, dist_km = ephemeris.planet_geocentric(name.lower(), dt)
+        x_norm, y_norm = _radec_scene_xy(ra, dist_km)
+        objects.append(
+            {
+                "id": f"planet-{name}",
+                "name": name,
+                "kind": "planet",
+                "x_norm": x_norm,
+                "y_norm": y_norm,
+                "vx_norm": 0.0,
+                "vy_norm": 0.0,
+                "speed_kms": speed_kms,
+                "source": "ephemeris",
+                "description": description,
+                "ra_deg": degrees(ra) % 360.0,
+                "dec_deg": degrees(dec),
             }
         )
     return objects
+
+
+def _sun_scene_object(dt: datetime) -> dict:
+    """The Sun at its real geocentric position for `dt`."""
+    from app import ephemeris
+
+    ra, dec, dist_km = ephemeris.sun_geocentric(dt)
+    x_norm, y_norm = _radec_scene_xy(ra, dist_km)
+    return {
+        "id": "body-Sun",
+        "name": "Sun",
+        "kind": "sun",
+        "x_norm": x_norm,
+        "y_norm": y_norm,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 0.0,
+        "source": "ephemeris",
+        "ra_deg": degrees(ra) % 360.0,
+        "dec_deg": degrees(dec),
+        "description": (
+            "The star at the heart of the solar system; its fusion powers the "
+            "light and warmth that make Earth habitable."
+        ),
+    }
+
+
+def _moon_scene_object(dt: datetime) -> dict:
+    """The Moon at its real geocentric position for `dt`."""
+    from app import ephemeris
+
+    ra, dec, dist_km = ephemeris.moon_geocentric(dt)
+    x_norm, y_norm = _radec_scene_xy(ra, dist_km)
+    return {
+        "id": "body-Moon",
+        "name": "Moon",
+        "kind": "moon",
+        "x_norm": x_norm,
+        "y_norm": y_norm,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 1.022,
+        "source": "ephemeris",
+        "ra_deg": degrees(ra) % 360.0,
+        "dec_deg": degrees(dec),
+        "description": (
+            "Earth's only natural satellite; its gravity drives the ocean tides "
+            "and it always shows us the same face."
+        ),
+    }
+
+
+def _earth_scene_object() -> dict:
+    """Earth, the observer, fixed at the centre of the map."""
+    return {
+        "id": "body-Earth",
+        "name": "Earth",
+        "kind": "earth",
+        "x_norm": 0.0,
+        "y_norm": 0.0,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 0.0,
+        "source": "ephemeris",
+        "description": (
+            "Our home planet and the observer's vantage point — the map is drawn "
+            "as the sky seen from here."
+        ),
+    }
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -181,50 +558,224 @@ class ForecastRequest(BaseModel):
 
 
 # ── API routes ────────────────────────────────────────────────────────────────
-@app.get("/api/scene")
-def get_scene(datetime_str: str | None = None, limit: int = 15):
-    if datetime_str:
-        try:
-            dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
-        except ValueError:
-            dt = datetime.now(timezone.utc)
-    else:
-        dt = datetime.now(timezone.utc)
+# Scenes hit slow external catalogs, so cache each (datetime, limit) result for a
+# short window — repeated loads (panning, re-opening) skip the network entirely.
+_SCENE_TTL_SECONDS = 45.0
+# Every distinct datetime is its own key, so an unbounded cache would grow one
+# ~100-object entry per request and never shrink.
+_SCENE_CACHE_MAX_ENTRIES = 64
+_scene_cache: dict[tuple, tuple[float, dict]] = {}
 
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+
+def _clear_scene_cache() -> None:
+    _scene_cache.clear()
+
+
+def _cached_scene(cache_key: tuple) -> dict | None:
+    """The cached scene for `cache_key`, if one is still inside its TTL."""
+    cached = _scene_cache.get(cache_key)
+    if cached is None:
+        return None
+    if (time.time() - cached[0]) >= _SCENE_TTL_SECONDS:
+        del _scene_cache[cache_key]
+        return None
+    return cached[1]
+
+
+def _cache_scene(cache_key: tuple, result: dict) -> None:
+    """Store a scene, dropping expired entries and capping total size."""
+    now = time.time()
+    expired = [
+        key
+        for key, (stored_at, _) in _scene_cache.items()
+        if (now - stored_at) >= _SCENE_TTL_SECONDS
+    ]
+    for key in expired:
+        del _scene_cache[key]
+
+    # Still full of live entries: evict the oldest to make room.
+    while len(_scene_cache) >= _SCENE_CACHE_MAX_ENTRIES:
+        oldest = min(_scene_cache, key=lambda key: _scene_cache[key][0])
+        del _scene_cache[oldest]
+
+    _scene_cache[cache_key] = (now, result)
+
+
+def _capped_scene_objects(
+    dt: datetime, satellite_cap: int
+) -> tuple[list[dict], list[dict]]:
+    """Fetch every capped catalog for `dt`, concurrently.
+
+    Returns the scene objects plus one cap row per kind (kind, shown, cap,
+    hidden, hidden_exact) describing what each cap left out. All sources are
+    independent, so scene latency is the slowest single source, not their sum.
+    """
+    caps = {kind: config.scene_cap(kind) for kind in _CAPPED_SCENE_KINDS}
+    caps["satellite"] = satellite_cap  # the caller may override this one
+
+    date_str = dt.strftime("%Y-%m-%d")
+    fetchers: dict[str, partial] = {
+        kind: partial(_celestrak_scene_objects, kind, dt, caps[kind])
+        for kind in _TLE_SCENE_KINDS
+    }
+    fetchers["near_earth_object"] = partial(
+        _jpl_scene_objects, date_str, caps["near_earth_object"]
+    )
+    fetchers.update(
+        {
+            kind: partial(_simbad_scene_objects, kind, caps[kind])
+            for kind in _DEEP_SPACE_KINDS
+        }
+    )
+
+    kinds = list(fetchers)
+    with ThreadPoolExecutor(max_workers=len(fetchers)) as pool:
+        results = list(pool.map(lambda fetch: fetch(), fetchers.values()))
 
     objects: list[dict] = []
+    cap_rows: list[dict] = []
+    for kind, result in zip(kinds, results):
+        objects.extend(result.objects)
+        cap_rows.append(
+            {
+                "kind": kind,
+                "shown": len(result.objects),
+                "cap": caps[kind],
+                "hidden": result.hidden,
+                "hidden_exact": result.hidden_exact,
+            }
+        )
+    return objects, cap_rows
 
-    # Space stations (ISS etc.). CelesTrak's legacy /pub/TLE/*.txt files now 403;
-    # the GP query API is the supported source.
-    stations_url = f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle"
+
+def _record_scene_caps(cap_rows: list[dict]) -> None:
+    """Publish the cap outcome to the admin monitor, and log the headline."""
+    from app.metrics import scene_cap_report
+
+    scene_cap_report.record(cap_rows)
+    hidden = sum(row["hidden"] for row in cap_rows)
+    if hidden:
+        detail = ", ".join(
+            f"{row['kind']} {row['shown']}/{row['shown'] + row['hidden']}"
+            f"{'' if row['hidden_exact'] else '+'}"
+            for row in cap_rows
+            if row["hidden"]
+        )
+        log.info("Scene caps hid %d object(s): %s", hidden, detail)
+
+
+# ── Position search ───────────────────────────────────────────────────────────
+# Default cone half-angle when a search gives coordinates but no radius.
+_DEFAULT_SEARCH_RADIUS_DEG = 30.0
+# Always kept in a position search: Earth is the observer's vantage point, not a
+# point on the sky it could be near or far from.
+_UNPLACEABLE_KEEP_KINDS = {"earth"}
+
+
+def _angular_separation_deg(
+    ra_a: float, dec_a: float, ra_b: float, dec_b: float
+) -> float:
+    """Great-circle angle in degrees between two (RA, Dec) points in degrees."""
+    ra_a, dec_a, ra_b, dec_b = map(radians, (ra_a, dec_a, ra_b, dec_b))
+    cosine = sin(dec_a) * sin(dec_b) + cos(dec_a) * cos(dec_b) * cos(ra_a - ra_b)
+    return degrees(acos(max(-1.0, min(1.0, cosine))))  # clamp away FP drift
+
+
+def _objects_near(
+    objects: list[dict], ra_deg: float, dec_deg: float, radius_deg: float
+) -> list[dict]:
+    """The objects within `radius_deg` of (ra_deg, dec_deg) on the sky.
+
+    Objects with no real sky position are dropped: JPL's close-approach records
+    carry no direction, and the UFO's position is unknown by design, so neither
+    can honestly answer "is it in this part of the sky?".
+    """
+    near: list[dict] = []
+    for obj in objects:
+        if obj["kind"] in _UNPLACEABLE_KEEP_KINDS:
+            near.append(obj)
+            continue
+        if obj.get("ra_deg") is None or obj.get("dec_deg") is None:
+            continue
+        separation = _angular_separation_deg(
+            obj["ra_deg"], obj["dec_deg"], ra_deg, dec_deg
+        )
+        if separation <= radius_deg:
+            near.append(obj)
+    return near
+
+
+def _parse_search_coord(value: str | None, name: str, limit: float) -> float | None:
+    """Parse one search coordinate in degrees, or None when it wasn't given.
+
+    Accepts a bare number or a trailing degree sign ("83.82" or "83.82°"), which
+    is what the form's placeholder shows.
+    """
+    if value is None or not str(value).strip():
+        return None
+    cleaned = str(value).strip().rstrip("°").strip()
     try:
-        resp = _requests.get(stations_url, timeout=8)
-        resp.raise_for_status()
-        objects.extend(_propagate_tles(resp.text, dt, limit=3, kind="iss"))
-    except Exception:
-        pass
+        degrees_value = float(cleaned)
+    except ValueError:
+        raise HTTPException(422, f"{name} must be a number, got {value!r}") from None
+    if not -limit <= degrees_value <= limit:
+        raise HTTPException(422, f"{name} must be between -{limit} and {limit}")
+    return degrees_value
 
-    # Active satellites (fill remaining slots)
-    remaining = max(0, limit - len(objects))
-    if remaining > 0:
-        active_url = f"{_CELESTRAK_GP}?GROUP=active&FORMAT=tle"
-        try:
-            resp = _requests.get(active_url, timeout=8)
-            resp.raise_for_status()
-            objects.extend(
-                _propagate_tles(resp.text, dt, limit=remaining, kind="satellite")
-            )
-        except Exception:
-            pass
 
-    # Near-Earth objects (JPL CAD) — the user's date drives the approach window.
-    objects.extend(_jpl_scene_objects(dt.strftime("%Y-%m-%d"), limit=5))
+def _parse_scene_datetime(datetime_str: str | None) -> datetime:
+    """The scene's moment, as an aware UTC datetime. Empty/absent means now.
 
-    # Deep-space catalog objects (SIMBAD) — static over the sim timescale.
-    objects.extend(_simbad_scene_objects("galaxy", "galaxy", limit=4))
-    objects.extend(_simbad_scene_objects("nebula", "nebula", limit=3))
+    An unparseable value is rejected rather than defaulted to now: silently
+    showing the present for a date the user picked is worse than an error.
+    """
+    if not datetime_str:
+        return datetime.now(timezone.utc)
+    try:
+        dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(
+            422, f"datetime_str must be ISO 8601, got {datetime_str!r}"
+        ) from None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+@app.get("/api/scene")
+def get_scene(
+    datetime_str: str | None = None,
+    limit: int | None = None,
+    ra: str | None = None,
+    dec: str | None = None,
+    radius_deg: float = _DEFAULT_SEARCH_RADIUS_DEG,
+):
+    """The scene for a moment, optionally narrowed to a patch of sky.
+
+    `ra`/`dec` are degrees; give both to search. `radius_deg` is the cone's
+    half-angle around them.
+    """
+    cache_key = (datetime_str, limit, ra, dec, radius_deg)
+    cached = _cached_scene(cache_key)
+    if cached is not None:
+        return cached
+
+    search_ra = _parse_search_coord(ra, "ra", 360.0)
+    search_dec = _parse_search_coord(dec, "dec", 90.0)
+    if (search_ra is None) != (search_dec is None):
+        raise HTTPException(422, "ra and dec must be given together")
+    if radius_deg <= 0 or radius_deg > 180:
+        raise HTTPException(422, "radius_deg must be between 0 and 180")
+
+    dt = _parse_scene_datetime(datetime_str)
+
+    satellite_cap = limit if limit is not None else config.scene_cap("satellite")
+    objects, cap_rows = _capped_scene_objects(dt, satellite_cap)
+    _record_scene_caps(cap_rows)
+
+    # Solar-system bodies at their real positions — local, no network.
+    objects.append(_earth_scene_object())
+    objects.append(_sun_scene_object(dt))
+    objects.append(_moon_scene_object(dt))
+    objects.extend(_planet_scene_objects(dt))
 
     # Unidentified — position intentionally unknown
     objects.append(
@@ -236,30 +787,56 @@ def get_scene(datetime_str: str | None = None, limit: int = 15):
             "y_norm": -0.20,
             "vx_norm": 0.0,
             "vy_norm": 0.0,
+            "speed_kms": 0.0,
             "source": "unknown",
         }
     )
 
-    return {"datetime": dt.isoformat(), "objects": objects}
+    result = {"datetime": dt.isoformat(), "objects": objects}
+    if search_ra is not None and search_dec is not None:
+        total = len(objects)
+        result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)
+        result["search"] = {
+            "ra_deg": search_ra,
+            "dec_deg": search_dec,
+            "radius_deg": radius_deg,
+            "matched": len(result["objects"]),
+            "searched": total,
+        }
+    _cache_scene(cache_key, result)
+    return result
 
 
 @app.get("/api/objects/{object_slug}")
-def get_objects(object_slug: str, date: str | None = None, limit: int = 20):
+def get_objects(object_slug: str, date: str | None = None, limit: int | None = None):
     from app.data_parser import get_data
 
-    return {
-        "slug": object_slug,
-        "results": get_data(object_slug, date=date, limit=limit),
-    }
+    try:
+        results = get_data(object_slug, date=date, limit=limit or config.object_limit())
+    except ValueError as exc:
+        # Unknown slug — a client error, not an upstream failure.
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception:
+        # A single external source (CelesTrak/JPL/SIMBAD) failing must not 500
+        # the endpoint; degrade to an empty result the UI can handle.
+        return {"slug": object_slug, "results": [], "error": "source_unavailable"}
+
+    return {"slug": object_slug, "results": results}
 
 
 @app.get("/api/classify/{obj_id}")
-def classify_object(obj_id: int):
-    from app.object_classifier import predict_patch
+def classify_object(obj_id: int, kind: str | None = None):
+    from app.object_classes import SLUG_TO_INDEX
+    from app.object_classifier import predict_patch, synthetic_patch
 
     cnn = _get_cnn()
-    rng = np.random.default_rng(seed=obj_id * 137 + 42)
-    patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
+    if kind in SLUG_TO_INDEX:
+        # Classify a patch characteristic of the clicked object's kind, so the
+        # result matches what was clicked instead of being arbitrary noise.
+        patch = synthetic_patch(kind, seed=obj_id)
+    else:
+        rng = np.random.default_rng(seed=obj_id * 137 + 42)
+        patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
     return predict_patch(cnn, patch)
 
 
@@ -393,8 +970,25 @@ class UploadIn(BaseModel):
     kind: str | None = None
 
 
+class PreferencesIn(BaseModel):
+    theme: str
+
+
+class CustomObjectIn(BaseModel):
+    name: str
+    kind: str
+    x_norm: float
+    y_norm: float
+
+
 def _public_user(user) -> dict:
-    return {"id": user["id"], "username": user["username"], "email": user["email"]}
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "email": user["email"],
+        "theme": user["theme"],
+        "is_admin": bool(user["is_admin"]),
+    }
 
 
 @app.post("/api/auth/register")
@@ -416,6 +1010,16 @@ def api_logout(authorization: str = Header(default="")):
 @app.get("/api/auth/me")
 def api_me(user=Depends(auth.current_user)):
     return _public_user(user)
+
+
+@app.put("/api/preferences")
+def api_set_preferences(body: PreferencesIn, user=Depends(auth.current_user)):
+    """Save the user's current UI theme as their profile default."""
+    theme = body.theme.strip()
+    if not theme:
+        raise HTTPException(422, "theme must not be empty")
+    db.set_user_theme(user["id"], theme)
+    return {"theme": theme}
 
 
 @app.get("/api/searches")
@@ -450,15 +1054,151 @@ def api_delete_upload(upload_id: int, user=Depends(auth.current_user)):
         raise HTTPException(404, "upload not found")
 
 
+# ── User-added scene objects ──────────────────────────────────────────────────
+def _valid_kind(kind: str) -> bool:
+    from app.object_classes import CLASS_SLUGS
+
+    return kind in CLASS_SLUGS
+
+
+@app.get("/api/custom-objects")
+def api_list_custom_objects(user=Depends(auth.current_user)):
+    return {"objects": db.list_custom_objects(user["id"])}
+
+
+@app.post("/api/custom-objects")
+def api_add_custom_object(body: CustomObjectIn, user=Depends(auth.current_user)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "name must not be empty")
+    if not _valid_kind(body.kind):
+        raise HTTPException(422, f"unknown kind: {body.kind!r}")
+    # Clamp to the map so a bad value can't fling an object off-screen.
+    x = max(-1.5, min(1.5, body.x_norm))
+    y = max(-1.5, min(1.5, body.y_norm))
+    object_id = db.add_custom_object(user["id"], name, body.kind, x, y)
+    return {
+        "id": object_id,
+        "name": name,
+        "kind": body.kind,
+        "x_norm": x,
+        "y_norm": y,
+        "vx_norm": 0.0,
+        "vy_norm": 0.0,
+        "speed_kms": 0.0,
+        "source": "custom",
+    }
+
+
+@app.delete("/api/custom-objects/{object_id}", status_code=204)
+def api_delete_custom_object(object_id: int, user=Depends(auth.current_user)):
+    if not db.delete_custom_object(user["id"], object_id):
+        raise HTTPException(404, "custom object not found")
+
+
+# ── Admin: API health monitor ─────────────────────────────────────────────────
+def _probe_sources() -> dict:
+    """Live reachability check of the external data sources (short timeouts)."""
+    import requests
+
+    checks = {
+        "celestrak": "https://celestrak.org/NORAD/elements/gp.php"
+        "?GROUP=stations&FORMAT=tle",
+        "jpl": "https://ssd-api.jpl.nasa.gov/cad.api"
+        "?date-min=now&date-max=%2B1&dist-max=0.05&limit=1",
+        "simbad": "https://simbad.u-strasbg.fr/simbad/sim-tap/sync"
+        "?REQUEST=doQuery&LANG=ADQL&FORMAT=json&QUERY=SELECT+TOP+1+main_id+FROM+basic",
+    }
+    out: dict = {}
+    for name, url in checks.items():
+        start = time.perf_counter()
+        try:
+            resp = requests.get(url, timeout=6)
+            out[name] = {
+                "ok": resp.ok,
+                "status": resp.status_code,
+                "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+            }
+        except Exception as exc:
+            out[name] = {
+                "ok": False,
+                "status": None,
+                "error": type(exc).__name__,
+                "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+            }
+    return out
+
+
+@app.get("/api/admin/health")
+def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admin)):
+    from app.metrics import metrics, scene_cap_report, source_failures
+
+    data = metrics.snapshot()
+    data["scene_caps"] = scene_cap_report.snapshot()
+    # Scene assembly hides source outages from users on purpose; admins see them.
+    data["source_failures"] = source_failures.snapshot()
+    if check_sources:
+        data["sources"] = _probe_sources()
+    return data
+
+
+def _ensure_admin_user() -> None:
+    """Dev convenience: a default admin/admin login, created if it's missing.
+
+    Bypasses the normal password-length rule on purpose — replace with a real
+    admin before any real deployment.
+    """
+    if db.get_user_by_username("admin"):
+        return
+    pw_hash, salt = auth.hash_password("admin")
+    db.create_user("admin", None, pw_hash, salt, is_admin=True)
+
+
+@app.on_event("startup")
+def _bootstrap_admin() -> None:
+    _ensure_admin_user()
+
+
 # ── Static files + SPA fallback ───────────────────────────────────────────────
+_STATIC_MAX_AGE = 3600  # 1 hour; StaticFiles' ETag still forces revalidation after.
+
+
+class _CachedStaticFiles(StaticFiles):
+    """StaticFiles that lets browsers cache assets instead of refetching every load."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.setdefault(
+            "Cache-Control", f"public, max-age={_STATIC_MAX_AGE}"
+        )
+        return response
+
+
 app.mount(
-    "/static", StaticFiles(directory=os.path.join(_front_end, "static")), name="static"
+    "/static",
+    _CachedStaticFiles(directory=os.path.join(_front_end, "static")),
+    name="static",
 )
 
 
 @app.get("/")
 def index():
     return FileResponse(os.path.join(_front_end, "index.html"))
+
+
+@app.get("/help")
+def help_page():
+    return FileResponse(os.path.join(_front_end, "help.html"))
+
+
+@app.get("/profile")
+def profile_page():
+    return FileResponse(os.path.join(_front_end, "profile.html"))
+
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse(os.path.join(_front_end, "admin.html"))
 
 
 if __name__ == "__main__":

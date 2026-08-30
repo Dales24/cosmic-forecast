@@ -5,7 +5,7 @@
  * /api/uploads endpoints; the session token lives in localStorage.
  */
 (() => {
-  const TOKEN_KEY = "cf_token";
+  const TOKEN_KEY = window.COSMIC.TOKEN_KEY;
   let token = localStorage.getItem(TOKEN_KEY) || null;
   let me = null;
   let lastUploadName = "";
@@ -209,12 +209,25 @@
     saveUploadBtn.style.display = show;
   }
 
+  // ── theme preference ──────────────────────────────────────────────────────
+  // Apply the theme saved on the profile, and persist the user's own changes.
+  function applyProfileTheme() {
+    if (me && me.theme && typeof window.cosmicSetTheme === "function") {
+      window.cosmicSetTheme(me.theme);
+    }
+  }
+
+  document.addEventListener("cosmic:themechange", (e) => {
+    if (me) api("/api/preferences", "PUT", { theme: e.detail });
+  });
+
   async function refresh() {
     if (token) {
       const res = await api("/api/auth/me");
       if (res.ok) me = await res.json();
       else { token = null; localStorage.removeItem(TOKEN_KEY); me = null; }
     }
+    applyProfileTheme();
     renderBar();
   }
 

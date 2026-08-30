@@ -9,6 +9,15 @@ document.body.innerHTML = `
   <button id="play-btn">&#9654; Play Simulation</button>
   <div id="sim-time" style="display:none"></div>
   <ul id="legend-list"></ul>
+  <div id="theme-switch">
+    <select id="theme-select">
+      <option value="default">Default</option>
+      <option value="cosmic">Purple Cosmic</option>
+      <option value="vangogh">Van Gogh</option>
+      <option value="burton">Tim Burton</option>
+      <option value="pirate">Pirate</option>
+    </select>
+  </div>
   <div id="form-view" style="display:block"></div>
   <div id="obj-view"  style="display:none"></div>
   <form id="scene-form">
@@ -16,7 +25,16 @@ document.body.innerHTML = `
     <input id="dec"          type="text">
     <input id="obs_datetime" type="datetime-local">
     <input type="submit">
+    <button type="button" id="clear-search">Clear</button>
   </form>
+  <form id="add-object-form">
+    <input id="add-name" type="text">
+    <select id="add-kind"></select>
+    <select id="add-band"></select>
+    <input id="add-ra" type="number" value="90">
+    <input type="submit">
+  </form>
+  <p id="add-object-note"></p>
   <div id="scene-result"></div>
   <div id="obj-title"></div>
   <div id="obj-class"></div>
@@ -30,6 +48,10 @@ document.body.innerHTML = `
   <div id="obj-orbit"></div>
   <div id="obj-radius"></div>
   <div id="obj-kind"></div>
+  <div id="obj-about">
+    <p id="obj-desc"></p>
+    <a id="obj-info-link" href="#">Further info &rarr;</a>
+  </div>
   <div id="upload-zone"></div>
   <input id="img-upload" type="file">
   <div id="upload-result" style="display:none"></div>
@@ -54,6 +76,7 @@ const _mockCtx = {
   arc: jest.fn(), fill: jest.fn(), stroke: jest.fn(),
   translate: jest.fn(), scale: jest.fn(), save: jest.fn(), restore: jest.fn(),
   ellipse: jest.fn(), moveTo: jest.fn(), lineTo: jest.fn(), setLineDash: jest.fn(),
+  quadraticCurveTo: jest.fn(), bezierCurveTo: jest.fn(), closePath: jest.fn(),
   rotate: jest.fn(), clip: jest.fn(), drawImage: jest.fn(), rect: jest.fn(),
   createRadialGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
   createLinearGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
@@ -70,6 +93,9 @@ global.fetch = jest.fn(() => Promise.resolve({
   ok: true,
   json: () => Promise.resolve({ objects: [], predictions: [] }),
 }));
+
+// ── Shared browser constants (loaded first in every page, so first here too) ──
+require('../static/config.js');
 
 // ── Load app module ───────────────────────────────────────────────────────────
 // jest.resetModules() is called between files, so the require is fresh each run.

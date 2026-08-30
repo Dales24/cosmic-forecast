@@ -4,6 +4,10 @@ A prediction system for tracking and forecasting space object trajectories. The 
 
 ## Architecture
 
+For the full picture — the CNN → track → transformer → Kalman pipeline, data
+sources, API surface, accounts, and how to add a new detection — see
+[docs/architecture.md](docs/architecture.md).
+
 ```
 app/
   api.py                     FastAPI backend — API routes + static file serving
@@ -45,12 +49,68 @@ front_end/
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/` | Frontend SPA |
+| `GET` | `/help` · `/profile` · `/admin` | Help, account, and admin-monitor pages |
 | `GET` | `/static/*` | CSS and JS assets |
+| `GET` | `/api/scene` | Assembled scene (CelesTrak TLEs + JPL + SIMBAD) for a datetime |
 | `GET` | `/api/objects/{slug}` | Live data from CelesTrak / JPL / SIMBAD |
 | `GET` | `/api/classify/{id}` | CNN classification for a canvas object |
+| `POST` | `/api/classify/upload` | CNN classification for an uploaded image |
+| `POST` | `/api/upload/csv` | Build a scene from an uploaded positions CSV |
 | `POST` | `/api/forecast` | Trajectory extrapolation for tracked objects |
 
-Query params for `/api/objects/{slug}`: `date=YYYY-MM-DD`, `limit=20`.
+**Accounts & persistence** (SQLite, Bearer-token sessions):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/register` · `/api/auth/login` · `/api/auth/logout` | Account + session lifecycle |
+| `GET` | `/api/auth/me` | Current signed-in user |
+| `GET`/`POST` | `/api/searches` | List / save simulation searches |
+| `DELETE` | `/api/searches/{id}` | Delete a saved search |
+| `GET`/`POST` | `/api/uploads` | List / save classification uploads |
+| `DELETE` | `/api/uploads/{id}` | Delete a saved upload |
+| `GET`/`POST` | `/api/custom-objects` | List / add the user's own scene objects |
+| `DELETE` | `/api/custom-objects/{id}` | Delete a custom object |
+| `PUT` | `/api/preferences` | Save UI preferences (theme) |
+| `GET` | `/api/admin/health` | Request metrics, scene caps, source failures (admin only) |
+
+### Query parameters
+
+`GET /api/scene` — every parameter is optional:
+
+| Param | Default | Meaning |
+|-------|---------|---------|
+| `datetime_str` | now | ISO 8601 UTC moment to build the scene for. Rejected with 422 if unparseable. |
+| `limit` | `COSMIC_CAP_SATELLITE` | Override the satellite cap only |
+| `ra`, `dec` | — | Degrees. Give **both** to narrow the scene to a patch of sky; accepts `83.82` or `83.82°` |
+| `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
+
+A position search adds a `search` block to the response (`matched`, `searched`,
+`radius_deg`). Objects with no real sky position — JPL near-Earth objects and
+the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-issues.md).
+
+`GET /api/objects/{slug}` — `date=YYYY-MM-DD`, `limit=20`.
+
+### Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `COSMIC_DB_PATH` | `data/cosmic.db` | SQLite database file |
+| `COSMIC_TLE_CACHE_DIR` | `data/tle_cache` | Where CelesTrak TLE text is cached on disk |
+| `COSMIC_ADMIN_USERS` | *(empty)* | Comma-separated usernames granted admin on registration |
+| `COSMIC_CAP_<KIND>` | see `app/config.py` | Per-kind cap on how many objects a catalog may add to a scene (e.g. `COSMIC_CAP_GALAXY=12`) |
+
+### Caching
+
+Three layers, each keyed on what actually changes — see
+[docs/known-issues.md](docs/known-issues.md) for the freshness implications:
+
+- **Scene** (45s, max 64 entries) — whole assembled scenes by datetime/limit/search.
+- **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
+  scene datetime, so a new minute doesn't refetch static sky.
+- **TLE disk cache** (2h) — raw CelesTrak text, matching its publish cadence.
+
+External-source failures never break a scene; they are logged and surfaced at
+`/api/admin/health`.
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 
@@ -87,14 +147,51 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Testing
 
+Backend (Python) — coverage gate is enforced at **≥ 80%** (currently ~97%):
+
 ```bash
 uv run pytest --cov=. --cov-fail-under=80
 ```
+
+Frontend (canvas SPA) — Jest + jsdom:
+
+```bash
+cd front_end && npm test
+```
+
+> **Note:** TensorFlow 2.16 imports `distutils`, which Python 3.12 dropped from
+> the stdlib. `setuptools<74` (pinned) restores it at runtime, and the root
+> `conftest.py` activates the shim before pytest collects any TF-importing test.
+
+## Publishing a model
+
+Models are pushed to Hugging Face by `scripts/publish_model.py`. It is a **dry
+run by default** — it prints the artifact and the full model card and uploads
+nothing until you pass `--push`.
+
+```bash
+uv sync --group publish            # installs huggingface_hub (not a runtime dep)
+
+# Preview: no token needed, nothing leaves your machine
+uv run python -m scripts.publish_model classifier --repo daley30/cosmic-classifier
+
+# Upload to a private repo
+export HF_TOKEN=hf_...
+uv run python -m scripts.publish_model classifier --repo daley30/cosmic-classifier --push
+
+# Public is opt-in and deliberate — read the card first
+uv run python -m scripts.publish_model classifier --repo daley30/... --push --public
+```
+
+Publishable models are declared in `app/model_publish.py`, each with the
+caveats that must appear on its card. Both current models are trained on
+**synthetic** data, and the card says so — see
+[docs/known-issues.md](docs/known-issues.md).
 
 ## Training
 
 Organize labelled image patches into subdirectories named by object slug (see `app/object_classes.py`) then run:
 
 ```bash
-uv run python scripts/train_object_classifier.py
+uv run python -m scripts.train_object_classifier
 ```

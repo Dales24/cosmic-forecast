@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Help · Cosmic Forecast</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/config.js"></script>
+</head>
+<body class="page-mode">
+  <script>
+    // Apply the saved theme (shared with the map page) before content paints.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem(window.COSMIC.THEME_KEY); } catch (e) { /* ignore */ }
+      document.body.classList.add("theme-" + (t || "default"));
+    })();
+  </script>
+
+  <nav class="top-nav">
+    <a href="/">Map</a>
+    <a href="/help">Help</a>
+    <a href="/profile">Profile</a>
+  </nav>
+
+  <main class="page">
+    <h1>Help &amp; Guide</h1>
+    <p class="lead">Cosmic Forecast tracks and forecasts space-object trajectories.
+      Load a scene of real objects, explore them, and fast-forward their motion.</p>
+
+    <div class="page-card">
+      <h2><span class="num">01</span>Load a scene</h2>
+      <p>On the map, enter an optional <strong>Right Ascension</strong> and
+        <strong>Declination</strong> plus a date &amp; time (defaults to now), then
+        click <strong>Load Scene</strong>. Real objects are pulled live from
+        CelesTrak, NASA JPL, and SIMBAD and placed on the map.</p>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">02</span>Navigate</h2>
+      <ul>
+        <li><strong>Drag</strong> to pan around the map.</li>
+        <li><strong>Scroll</strong> to zoom in and out.</li>
+        <li>Objects stay frozen until you press Play.</li>
+      </ul>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">03</span>Filter by type</h2>
+      <p>Click any row in the legend to isolate that kind of object (satellites,
+        galaxies, planets, and more). Click <strong>All Objects</strong> to reset.</p>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">04</span>Inspect an object</h2>
+      <p>Click any object — including the Sun, Earth, Moon, and planets — to open
+        its detail panel, which shows:</p>
+      <ul>
+        <li>Its real name, data source, velocity, and orbital coordinates.</li>
+        <li>A CNN <strong>classification</strong> with a confidence score.</li>
+        <li>An <strong>About</strong> fact and a <strong>Further info</strong> link.</li>
+      </ul>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">05</span>Play the simulation</h2>
+      <p>Press <strong>▶ Play Simulation</strong> to fast-forward at 200× real time.
+        Objects advance along their real velocities, with dashed
+        machine-learning-predicted forecast paths overlaid.</p>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">06</span>Classify an image</h2>
+      <p>Use <strong>Classify Image Patch</strong> to drop in a telescope image and
+        have the CNN predict what kind of object it is.</p>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">07</span>Themes</h2>
+      <p>Pick a look from the <strong>Theme</strong> dropdown — Default, Purple
+        Cosmic, Van Gogh, Tim Burton, or Pirate. Each restyles the whole interface
+        and the sky. When you're logged in, your choice is saved to your profile.</p>
+    </div>
+
+    <div class="page-card">
+      <h2><span class="num">08</span>Accounts &amp; saved work</h2>
+      <p>Log in from the top-right of the map to save simulation searches and
+        classification results, and to keep your theme across devices. See them
+        anytime on your <a href="/profile">Profile</a>.</p>
+    </div>
+  </main>
+</body>
+</html>
