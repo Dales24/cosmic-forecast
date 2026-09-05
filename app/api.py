@@ -1142,12 +1142,25 @@ def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admi
     return data
 
 
-def _ensure_admin_user() -> None:
-    """Dev convenience: a default admin/admin login, created if it's missing.
+_ADMIN_BOOTSTRAP_ENV = "COSMIC_BOOTSTRAP_ADMIN"
+_TRUTHY = {"1", "true", "yes", "on"}
 
-    Bypasses the normal password-length rule on purpose — replace with a real
-    admin before any real deployment.
+
+def _bootstrap_admin_enabled() -> bool:
+    return os.environ.get(_ADMIN_BOOTSTRAP_ENV, "").strip().lower() in _TRUTHY
+
+
+def _ensure_admin_user() -> None:
+    """Dev convenience: a default admin/admin login, off unless
+    ``COSMIC_BOOTSTRAP_ADMIN`` is truthy.
+
+    It's an unauthenticated admin with a guessable password and bypasses the
+    password-length rule on purpose, so it must never be enabled on a
+    deployment anyone else can reach. Set the env var only for local work;
+    for a real deployment name admins via ``COSMIC_ADMIN_USERS`` instead.
     """
+    if not _bootstrap_admin_enabled():
+        return
     if db.get_user_by_username("admin"):
         return
     pw_hash, salt = auth.hash_password("admin")

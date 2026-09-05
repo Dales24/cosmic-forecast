@@ -10,11 +10,21 @@ import json
 import os
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_DB = os.path.join(_ROOT, "data", "cosmic.db")
+
+# A session token is good for a week, then the user re-logs in. The sessions
+# table has no other expiry, so without this a token stays valid forever and
+# the table only grows.
+_SESSION_TTL_SECONDS = 7 * 24 * 3600
+
+# How long a blocked writer waits for a lock before giving up. WAL keeps
+# readers and writers off each other's backs, but a checkpoint still takes a
+# brief exclusive lock.
+_BUSY_TIMEOUT_MS = 5000
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -81,6 +91,11 @@ def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+    # WAL lets readers run while a write is in flight instead of blocking on it.
+    # It needs a real file; an in-memory DB stays on the default journal.
+    if path != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
     if path not in _initialized:
         conn.executescript(_SCHEMA)
         _migrate(conn)
@@ -100,6 +115,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _session_cutoff() -> str:
+    """The oldest `created_at` a session may have and still count as live.
+
+    Every stamp is UTC ISO-8601 from `_now()`, so a plain string compare is a
+    valid chronological one.
+    """
+    oldest = datetime.now(timezone.utc) - timedelta(seconds=_SESSION_TTL_SECONDS)
+    return oldest.isoformat()
 
 
 # ── Owned-row helpers ─────────────────────────────────────────────────────────
@@ -192,6 +217,8 @@ def set_user_theme(user_id: int, theme: str) -> None:
 # ── sessions ──────────────────────────────────────────────────────────────────
 def create_session(user_id: int, token_hash: str) -> None:
     with closing(get_conn()) as conn:
+        # Sweep expired rows on each login so the table doesn't grow forever.
+        conn.execute("DELETE FROM sessions WHERE created_at < ?", (_session_cutoff(),))
         conn.execute(
             "INSERT INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)",
             (token_hash, user_id, _now()),
@@ -203,8 +230,8 @@ def get_user_by_token(token_hash: str) -> Optional[sqlite3.Row]:
     with closing(get_conn()) as conn:
         return conn.execute(
             "SELECT u.* FROM users u JOIN sessions s ON s.user_id = u.id "
-            "WHERE s.token_hash = ?",
-            (token_hash,),
+            "WHERE s.token_hash = ? AND s.created_at >= ?",
+            (token_hash, _session_cutoff()),
         ).fetchone()
 
 

@@ -140,21 +140,23 @@ positions computed from them.
 
 ## Accounts and storage
 
-- **A default `admin` / `admin` login is created on startup.** `_ensure_admin_user`
-  in `api.py` bootstraps it for convenience and deliberately bypasses the
-  minimum-password rule. **This must be removed or gated before the app is
-  reachable by anyone else** — it is an unauthenticated admin account with a
-  guessable password.
-- **Sessions never expire.** The `sessions` table stores a token hash and a
-  creation time but no expiry, and nothing prunes it. A token stays valid until
-  the user logs out, and the table only grows. (`auth.py` returns "invalid or
-  expired token", but nothing can currently expire.)
+- **The default `admin` / `admin` login is gated behind an env flag.**
+  `_ensure_admin_user` in `api.py` creates it only when `COSMIC_BOOTSTRAP_ADMIN`
+  is truthy (`1`/`true`/`yes`/`on`); otherwise startup makes no admin. It still
+  bypasses the minimum-password rule, so enable it for local work only — for a
+  real deployment name admins via `COSMIC_ADMIN_USERS` and leave the flag unset.
+- **Sessions expire after 7 days.** `db._SESSION_TTL_SECONDS` bounds a token's
+  life; `get_user_by_token` ignores rows older than that, and each login sweeps
+  expired rows, so the table no longer grows without bound. Logout still
+  invalidates a token immediately. There is no sliding refresh — the clock runs
+  from when the token was issued.
 - **SQLite is opened per query.** Every `db.*` call opens a new connection, sets
   its pragmas, and closes it — roughly 37× the cost of a shared connection on
   repeated reads. Fine at this scale, wasteful at any other.
-- **Not in WAL mode.** `journal_mode` is the default `delete`, so writers block
-  readers. Concurrent writes survive on SQLite's 5s busy timeout rather than by
-  design.
+- **WAL mode is on.** `get_conn` sets `journal_mode = WAL` (real-file DBs only;
+  an in-memory test DB stays on the default journal) plus a 5s `busy_timeout`,
+  so a read no longer blocks behind a write. Still one connection per query
+  (below), so this only softens contention, it doesn't remove it.
 - **Per-user indexes exist, per-table scans do not.** `user_id` is indexed on
   every owned table; `sessions.token_hash` and `users.username` are covered by
   their PRIMARY KEY / UNIQUE constraints.

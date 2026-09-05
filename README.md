@@ -97,6 +97,7 @@ the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-is
 | `COSMIC_DB_PATH` | `data/cosmic.db` | SQLite database file |
 | `COSMIC_TLE_CACHE_DIR` | `data/tle_cache` | Where CelesTrak TLE text is cached on disk |
 | `COSMIC_ADMIN_USERS` | *(empty)* | Comma-separated usernames granted admin on registration |
+| `COSMIC_BOOTSTRAP_ADMIN` | *(unset)* | When truthy (`1`/`true`/`yes`/`on`), create a default `admin`/`admin` login on startup. Local dev only — never set it where others can reach the app |
 | `COSMIC_CAP_<KIND>` | see `app/config.py` | Per-kind cap on how many objects a catalog may add to a scene (e.g. `COSMIC_CAP_GALAXY=12`) |
 
 ### Caching
