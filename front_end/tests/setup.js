@@ -36,6 +36,7 @@ document.body.innerHTML = `
   </form>
   <p id="add-object-note"></p>
   <div id="scene-result"></div>
+  <p id="source-warning" role="status" hidden></p>
   <div id="obj-title"></div>
   <div id="obj-class"></div>
   <div id="obj-conf"></div>

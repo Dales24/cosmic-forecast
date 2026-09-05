@@ -5,10 +5,6 @@ caveats behind the scene visualization. Grouped by area.
 
 ## Data sources
 
-- **CelesTrak legacy URLs are dead.** The old `https://celestrak.org/pub/TLE/*.txt`
-  files now return HTTP 403. We use the GP query API instead
-  (`gp.php?GROUP=...&FORMAT=tle`). Mapping: `iss → stations`,
-  `space_debris → cosmos-2251-debris`.
 - **"Satellite" may not be the whole catalogue.** The `satellite` slug tries
   three queries in order — `active`, then `starlink`, then `last-30-days` — and
   the first that responds wins. `active` is the canonical set but is CelesTrak's
@@ -117,20 +113,29 @@ real great-circle separation against each object's `ra_deg`/`dec_deg`.
 
 ## Caching and freshness
 
-Three independent layers, each keyed on what actually changes:
+Three cache layers reduce repeated source requests:
 
-- **Scene cache** (`_SCENE_TTL_SECONDS`, 45s): whole assembled scenes, keyed by
-  datetime + limit + search. Bounded at `_SCENE_CACHE_MAX_ENTRIES` (64) with
-  expiry pruning, since every distinct datetime is its own key.
-- **Catalog cache** (`_SIMBAD_TTL_SECONDS` 6h, `_JPL_TTL_SECONDS` 1h): keyed on
-  each source's *real* inputs, not the scene datetime — SIMBAD deep-space
-  objects are fixed on this timescale and JPL's list changes only by date.
-- **TLE disk cache** (`_TLE_CACHE_TTL_SECONDS`, 2h): raw CelesTrak text.
+- **Scene cache** (`_SCENE_TTL_SECONDS`, 45s): assembled scenes, keyed by
+  `datetime_str`, `limit`, `ra`, `dec`, and `radius_deg`. Bounded at
+  `_SCENE_CACHE_MAX_ENTRIES` (64), with expired entries pruned on insertion
+  and the oldest entries evicted when full. When datetime is omitted, repeated
+  requests can reuse the same scene for 45s instead of recomputing for now.
+- **Catalog cache** (`_SIMBAD_TTL_SECONDS`, 6h; `_JPL_TTL_SECONDS`, 1h): SIMBAD
+  results are keyed by object kind and cap; JPL results by requested date and
+  cap. The date is a query input, not a guarantee that upstream data changes
+  only once per day. This in-memory cache has no entry limit or expiry sweep;
+  expired entries are replaced only when their key is requested again.
+- **TLE disk cache** (`_TLE_CACHE_TTL_SECONDS`, 2h): raw CelesTrak text, keyed
+  by object slug. After 2h a refresh is attempted; if all candidate URLs fail,
+  the existing file is served with no maximum stale age.
 
-Consequence: a scene can be served from data up to the relevant TTL old. For
-deep-space objects that's harmless; for satellites the sgp4 propagation always
-runs against the requested datetime, so only the *elements* age, not the
-positions computed from them.
+These TTLs control cache reuse, not the age of the source observations. A
+cached scene can extend reuse of its source data by another 45s, and failed
+TLE refreshes can leave much older elements in use. On a scene rebuild, sgp4
+propagates those elements to the requested datetime; a scene cache hit reuses
+the already computed positions. Propagation does not refresh the elements or
+prevent accuracy from degrading as the requested time moves away from their
+epoch.
 
 ## Classification
 
@@ -195,10 +200,10 @@ positions computed from them.
 
 ## Robustness
 
-- **Degradation on fetch failure is quiet for users, visible to admins.** Every
-  external fetch is wrapped in `try/except` so one source failing never crashes
-  the scene. Failures now go through `api._source_unavailable`, which logs a
-  warning and records the source, kind, error and a repeat count for
-  `/api/admin/health` (shown on the admin page). The end user still sees only a
-  sparser map — they can't tell a network problem from genuinely sparse data —
-  but the information is no longer lost.
+- **Partial scenes show a data availability notice.** Failed scene sources
+  appear in `/api/scene` as `source_warnings` and in a "Map incomplete" notice
+  beside the map legend, naming the affected object kinds and sources. Cached
+  results retain their warnings; a healthy scene response clears the notice.
+  Detailed errors and repeat counts remain in `/api/admin/health`. Successful
+  CelesTrak fallback to stale data or a smaller catalog is not flagged by this
+  notice.

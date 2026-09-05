@@ -43,6 +43,25 @@ describe('sceneResultHTML()', () => {
 // ── loadScene() ───────────────────────────────────────────────────────────────
 
 describe('loadScene()', () => {
+  test('shows missing sources and clears the notice after recovery', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], source_warnings: [
+        { source: 'celestrak', kind: 'satellite' },
+      ] }),
+    });
+    expect((await app.loadScene('2026-12-25T00:00:00Z')).ok).toBe(true);
+    const notice = document.getElementById('source-warning');
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Map incomplete');
+    expect(notice.textContent).toContain('Satellite (celestrak)');
+    global.fetch.mockResolvedValue({
+      ok: true, json: async () => ({ objects: [], source_warnings: [] }),
+    });
+    await app.loadScene('2026-12-26T00:00:00Z');
+    expect(notice.hidden).toBe(true);
+    expect(notice.textContent).toBe('');
+  });
   test('sends the chosen datetime to the API and reports the count', async () => {
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,

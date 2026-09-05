@@ -319,6 +319,16 @@ async function loadScene(datetimeISO, search) {
     }
     const data = await resp.json();
     sceneObjects = data.objects || [];
+    const warning = document.getElementById("source-warning");
+    if (warning) {
+      const missing = (data.source_warnings || []).map(item =>
+        (KIND_NAMES[item.kind] || item.kind) + " (" + item.source + ")"
+      );
+      warning.hidden = missing.length === 0;
+      warning.textContent = missing.length
+        ? "Map incomplete: data unavailable for " + missing.join(", ") + ". Try again later."
+        : "";
+    }
     matched = data.search || null;
     await mergeCustomObjects(); // the user's own saved objects
     syncLocalBodies(); // point the Sun/Moon artwork at their real positions

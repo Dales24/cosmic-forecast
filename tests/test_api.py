@@ -1052,6 +1052,15 @@ def test_scene_records_source_failures_instead_of_hiding_them():
         r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
 
     assert r.status_code == 200  # the scene still builds
+    warnings = r.json()["source_warnings"]
+    assert {row["source"] for row in warnings} == {"celestrak", "jpl", "simbad"}
+    assert all(set(row) == {"source", "kind"} for row in warnings)
+    assert (
+        client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z").json()[
+            "source_warnings"
+        ]
+        == warnings
+    )
     snapshot = source_failures.snapshot()
     assert snapshot["total"] > 0
     sources = {row["source"] for row in snapshot["sources"]}
@@ -1080,5 +1089,6 @@ def test_healthy_scene_records_no_failures():
         patch("app.data_parser.fetch_jpl", return_value=[]),
         patch("app.data_parser.fetch_simbad", return_value=[]),
     ):
-        client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
+        response = client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
+    assert response.json()["source_warnings"] == []
     assert source_failures.snapshot()["total"] == 0

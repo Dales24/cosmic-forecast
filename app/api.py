@@ -192,7 +192,7 @@ def _source_unavailable(source: str, kind: str, exc: Exception) -> "CappedObject
 
     log.warning("%s fetch failed for %s: %s", source, kind, exc)
     source_failures.record(source, kind, str(exc))
-    return CappedObjects([], 0, True)
+    return CappedObjects([], 0, True, source)
 
 
 # ── Catalog result cache ──────────────────────────────────────────────────────
@@ -233,6 +233,7 @@ class CappedObjects(NamedTuple):
     objects: list[dict]
     hidden: int  # objects the cap excluded; 0 when nothing was dropped
     hidden_exact: bool  # False when `hidden` is a "there are more" floor
+    unavailable_source: str | None = None
 
 
 def _probe_cap(cap: int) -> int:
@@ -645,6 +646,8 @@ def _capped_scene_objects(
                 "hidden_exact": result.hidden_exact,
             }
         )
+        if result.unavailable_source:
+            cap_rows[-1]["unavailable_source"] = result.unavailable_source
     return objects, cap_rows
 
 
@@ -792,7 +795,15 @@ def get_scene(
         }
     )
 
-    result = {"datetime": dt.isoformat(), "objects": objects}
+    result = {
+        "datetime": dt.isoformat(),
+        "objects": objects,
+        "source_warnings": [
+            {"source": row["unavailable_source"], "kind": row["kind"]}
+            for row in cap_rows
+            if row.get("unavailable_source")
+        ],
+    }
     if search_ra is not None and search_dec is not None:
         total = len(objects)
         result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)
