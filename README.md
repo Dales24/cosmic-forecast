@@ -157,7 +157,7 @@ uv run pytest --cov=. --cov-fail-under=80
 Frontend (canvas SPA) — Jest + jsdom:
 
 ```bash
-cd front_end && npm test
+cd front_end && npm ci && npm test
 ```
 
 > **Note:** TensorFlow 2.16 imports `distutils`, which Python 3.12 dropped from

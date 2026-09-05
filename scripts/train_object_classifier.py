@@ -12,7 +12,10 @@ from typing import Callable
 # import (app.object_classifier pulls it in). Same reason as app/api.py.
 import setuptools  # noqa: F401
 
-from app.object_classifier import (
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.object_classifier import (  # noqa: E402
     DEFAULT_MODEL_DIR,
     create_cnn_model,
     generate_synthetic_dataset,

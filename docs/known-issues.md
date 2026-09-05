@@ -1,209 +1,151 @@
 # Known Issues & Limitations
 
-Honest accounting of what the data pipeline does and does not do, and the
-caveats behind the scene visualization. Grouped by area.
+Open issues and accepted limitations, grouped by area. Resolved items are
+removed. Rankings below are suggested engineering priorities based on code
+inspection, not a security audit or load test.
 
-## Data sources
+## Tiers and priorities
 
-- **"Satellite" may not be the whole catalogue.** The `satellite` slug tries
-  three queries in order — `active`, then `starlink`, then `last-30-days` — and
-  the first that responds wins. `active` is the canonical set but is CelesTrak's
-  most throttled group, so during a throttle window a cold start silently falls
-  back to a *subset*, and the map shows (say) only Starlink craft. Nothing in
-  the UI distinguishes the two cases; the admin health page records the
-  failures that caused the fallback.
-- **CelesTrak rate-limits repeated downloads.** Requesting the same GROUP again
-  before CelesTrak's data updates returns `403 "GP data has not updated since
-  your last successful download"`. A TLE group is now cached on disk and served
-  from there for 2h (`_TLE_CACHE_TTL_SECONDS`), matching CelesTrak's own update
-  cadence, so repeated scene loads no longer hit the network at all. Past the
-  TTL a failed refresh still falls back to the last cached copy, so a throttled
-  window degrades to *stale* elements rather than an empty sky.
-- **No GP group for rocket bodies.** CelesTrak retired the dedicated file and the
-  GP API has no `rocket-bodies` group. Rocket bodies are catalogued with an
-  "R/B" suffix in the object name, so the slug queries `NAME=R/B` instead of a
-  GROUP. This returns real rocket bodies, but it is a name match — anything
-  catalogued without the suffix is missed.
-- **Space debris is a single representative field.** `space_debris` is sourced
-  from `cosmos-2251-debris` (a large, real debris field), not "all debris" —
-  there is no generic debris group.
+| Label | Meaning |
+| --- | --- |
+| T1 — High | Materially misleading results, potential service interruption, or privileged-access risk under the stated conditions. |
+| T2 — Medium | Reduced completeness, reliability, accuracy, or scalability. |
+| T3 — Low | Usability, maintenance, or intentional presentation limitation. |
+| P0 — Immediate | Confirmed urgent incident or release blocker. None identified in this review. |
+| P1 — Next | Address in the next engineering pass. |
+| P2 — Planned | Schedule after P1 work. |
+| P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
-## Scene positions (x/y coordinates)
-
-Everything now shares **one map** centred on Earth: the **angle** is each
-object's real geocentric right ascension, and the **radius** grows with the
-*log* of its real geocentric distance (a LEO satellite and a galaxy can't share
-a linear distance scale, so distance is honestly compressed). The bands run
-Earth → LEO → GEO → Moon → planets → deep sky (`_scene_radius` in `api.py`).
-
-- **Satellites / ISS / debris / rocket bodies:** real sgp4 positions — angle
-  from the ECI direction, radius from true geocentric distance, and a real
-  orbital angular rate driving the animation. Time-aware.
-- **Sun, Moon, planets:** real geocentric positions from `app.ephemeris` (JPL
-  Keplerian elements + an abbreviated lunar series), accurate to ~arc-minutes.
-- **SIMBAD deep-space:** real right ascension sets the angle; distance is
-  effectively infinite, so they sit on the outer sky band (spread by declination).
-- **JPL near-Earth objects:** the approach *distance* is real (sets the radius),
-  but the CAD API gives no on-sky position, so the **direction is still a
-  deterministic placeholder** — the one thing we can't source without ephemeris
-  for each body.
-- **UFO:** hardcoded at `(0.28, -0.20)` by design — "position intentionally
-  unknown."
-
-Lighting note: the Moon's phase follows the real Sun direction, but Earth's and
-the planets' shading stay stylised (fixed upper-left), so shadows may not line
-up with the Sun's real on-screen position.
-
-## Date / time handling
-
-- **Satellite datetime drives propagation, not fetching.** The user's datetime
-  is fed to sgp4 to advance positions, but CelesTrak only serves the *latest*
-  elements — there is no historical-TLE-by-date query. Accuracy degrades the
-  further the chosen time is from now.
-- **Only JPL honors the date.** The UI datetime reaches JPL CAD as `date-min`,
-  with `date-max` computed explicitly as `date-min + 30 days`. CAD reads a
-  *relative* `date-max` ("+30") as an offset from today, not from `date-min`, so
-  the previous relative form searched the wrong window for any other date —
-  returning nothing for a future date and six years of approaches for a past
-  one. SIMBAD and CelesTrak take no date.
-- **Catalog object velocities are zero.** JPL/SIMBAD scene objects get
-  `vx_norm = vy_norm = 0`; they don't participate in the forward simulation.
-- **`/api/objects/{slug}` is date-aware but unused.** That endpoint forwards the
-  date to the right source, but the frontend never calls it; the scene is built
-  by `/api/scene` only.
-
-## Position search
-
-`/api/scene?ra=&dec=&radius_deg=` filters the scene to a cone on the sky, using
-real great-circle separation against each object's `ra_deg`/`dec_deg`.
-
-- **Objects without a real sky position are excluded from a search.** JPL
-  near-Earth objects (CAD gives no direction) and the UFO (unknown by design)
-  carry no usable RA/Dec, so a position search drops them rather than filtering
-  on a placeholder angle. They still appear in an unfiltered scene. Earth is
-  always kept — it's the observer, not a point on the sky.
-- **The map projection collapses declination, so the search is more precise
-  than the picture.** The scene plots RA as angle and log-distance as radius;
-  declination only nudges the deep-sky band slightly. Two objects that look
-  adjacent on the map can be far apart on the real sky, and a search cone
-  appears as a radial wedge rather than a circle. The filtering is correct; the
-  2D rendering is the lossy part.
-- **Declinations for solar-system bodies come from the same approximate
-  ephemeris as their RA** — good to roughly arc-minutes, not survey-grade.
-
-## Scene effects (motifs and collisions)
-
-- **Explosions are not conjunction analysis.** A burst fires when two moving
-  objects come within `COLLISION_DIST_SCENE` (0.006 scene units) *on the map*.
-  The map's radius is a **log** of geocentric distance, so two objects that look
-  adjacent can be hundreds of km apart in reality. Treat these as a visual
-  flourish showing near-passes at map resolution — not a collision prediction,
-  and not something to act on.
-- **Only an *approach* counts, never mere proximity.** Plenty of real objects
-  are permanently co-located on this projection — ISS modules docked to the same
-  station, Starlink satellites in formation. A pair must be seen apart before it
-  can fire, and must separate again before firing twice (plus a
-  `COLLISION_COOLDOWN_MS` guard). Without this, roughly 60 pairs "collided" on
-  every single frame from the moment the simulation started.
-- **Collisions are cosmetic — nothing is destroyed.** Objects pass through each
-  other and keep their trajectories; the burst is drawn over the top.
-- **Motifs decorate moving objects only** (`MOTIF_KINDS`: satellites, ISS,
-  debris, rocket bodies, UFO). Ornamenting all ~109 objects would bury the deep
-  sky. The default theme has no motif by design.
+Start with DATA-01 and MODEL-01.
+Check AUTH-01 before exposing a deployment.
 
 ## Caching and freshness
 
-Three cache layers reduce repeated source requests:
+The six original cache issues are addressed. Scene responses still reuse data
+for 45 seconds (30 seconds when sources fail), with 64 entries maximum. The UI
+shows scene time, stale-download notices, and a warning for elements older than
+7 days. Download age and element epoch are separate measurements; the 7-day
+notice is a display heuristic, not a validated propagation accuracy bound.
 
-- **Scene cache** (`_SCENE_TTL_SECONDS`, 45s): assembled scenes, keyed by
-  `datetime_str`, `limit`, `ra`, `dec`, and `radius_deg`. Bounded at
-  `_SCENE_CACHE_MAX_ENTRIES` (64), with expired entries pruned on insertion
-  and the oldest entries evicted when full. When datetime is omitted, repeated
-  requests can reuse the same scene for 45s instead of recomputing for now.
-- **Catalog cache** (`_SIMBAD_TTL_SECONDS`, 6h; `_JPL_TTL_SECONDS`, 1h): SIMBAD
-  results are keyed by object kind and cap; JPL results by requested date and
-  cap. The date is a query input, not a guarantee that upstream data changes
-  only once per day. This in-memory cache has no entry limit or expiry sweep;
-  expired entries are replaced only when their key is requested again.
-- **TLE disk cache** (`_TLE_CACHE_TTL_SECONDS`, 2h): raw CelesTrak text, keyed
-  by object slug. After 2h a refresh is attempted; if all candidate URLs fail,
-  the existing file is served with no maximum stale age.
+Catalog storage is capped at 256 entries with expiry pruning. Successful SIMBAD
+and JPL results retain their 6-hour/1-hour TTLs; failed results retry after
+30 seconds. Same-key requests share work without blocking other keys' fetches.
 
-These TTLs control cache reuse, not the age of the source observations. A
-cached scene can extend reuse of its source data by another 45s, and failed
-TLE refreshes can leave much older elements in use. On a scene rebuild, sgp4
-propagates those elements to the requested datetime; a scene cache hit reuses
-the already computed positions. Propagation does not refresh the elements or
-prevent accuracy from degrading as the requested time moves away from their
-epoch.
+TLE downloads are validated before atomic replacement. Unchanged files reuse
+validated text/metadata in memory. Fresh downloads are reused for 2 hours;
+failed refreshes retry after 30 seconds and may serve downloads less than
+24 hours old. Older downloads are unavailable, and scene-cache expiry cannot
+extend that deadline. The 24-hour bound is on download age, not element epoch.
 
-## Classification
+Locks and request sharing are process-local; separate server workers have
+independent caches and can fetch the same source. Atomic file replacement keeps
+shared disk readers from seeing partial writes. Cache-hit performance and
+concurrency regression tests cover the single-process application model.
 
-- **Classifications are not real.** `/api/classify/{id}` runs the CNN on a
-  *random synthetic patch* seeded by the object id — there is no real telescope
-  imagery in the pipeline. Output is illustrative only.
+## Data sources
+
+- **DATA-01 · T2 · P1 — Satellite fallback silently reduces coverage.**
+  Queries try `active`, `starlink`, then `last-30-days`; a fallback can show
+  only a subset. Even `active` is not the entire satellite catalog. Failed
+  candidates are swallowed inside the fetcher, so a later success also hides
+  them from the admin failure log. Return the selected query and fallback
+  status, record failed attempts, and label coverage in the UI.
+- **DATA-02 · T2 · P2 — Rocket-body coverage relies on names.**
+  `NAME=R/B` misses objects without that name fragment. Label the selection
+  rule and investigate catalog object-type filtering for broader coverage.
+- **DATA-03 · T2 · P2 — Debris represents one collision field.**
+  `space_debris` maps to `cosmos-2251-debris`. Label the field in the UI;
+  additional fields need explicit selection and deduplication.
+
+## Positions, dates, and search
+
+The map plots right ascension as angle and log geocentric distance as radius.
+Satellite positions use sgp4; Sun/Moon/planet positions use the local approximate
+ephemeris. JPL CAD requests cover the selected date through 30 days later.
+SIMBAD and CelesTrak fetches do not select historical catalogs.
+
+- **POS-01 · T1 · P2 — Near-Earth object directions are placeholders.**
+  CAD supplies approach distance but no sky direction; placement uses a
+  deterministic angle. Label placement as illustrative until per-object
+  ephemerides provide real coordinates.
+- **POS-02 · T2 · P2 — Satellite dates do not select historical elements.**
+  Available TLEs are propagated to any requested time. Accuracy degrades away
+  from their epoch. Show epoch/age and warn outside a validated time interval.
+- **POS-03 · T2 · P2 — JPL/SIMBAD objects stay static in simulation.**
+  Their scene velocities are zero. This is a display simplification for distant
+  objects, but does not model near-Earth motion. Add JPL ephemeris-based motion
+  or explicitly label those objects as static.
+- **POS-04 · T2 · P2 — Projection distorts apparent proximity.**
+  Declination is mostly collapsed. Adjacent map objects can be far apart in
+  the sky; spherical position-search results need not look circular on the map.
+  Explain the projection or add an RA/Dec sky view.
+- **POS-05 · T2 · P2 — Search omits objects without coordinates.**
+  Near-Earth objects and the intentional UFO placeholder are excluded; Earth
+  remains as observer. Report excluded categories so empty results are clear.
+- **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
+  Validate `app/ephemeris.py` against a reference over the supported date range
+  before advertising an accuracy bound or supporting telescope pointing.
+- **POS-07 · T3 · P3 — Alternate object endpoint is unused by the UI.**
+  The frontend uses `/api/scene`, not `/api/objects/{slug}`. Document intended
+  consumers and keep date/source semantics consistent; this is not itself a
+  broken date-selection flow.
+
+## Scene effects and presentation
+
+- **FX-01 · T1 · P2 — Explosions can imply real collision predictions.**
+  Bursts use projected map distance, not physical conjunction analysis.
+  Approach/reseparation and cooldown guards do not establish collision risk.
+  Label effects as cosmetic or disable them by default; trajectories continue.
+- **FX-02 · T3 · P3 — UFO and motifs are intentional decoration.**
+  UFO placement is fixed at `(0.28, -0.20)`; motifs decorate moving kinds only.
+  The default theme has none. Preserve clear illustrative labeling.
+- **FX-03 · T3 · P3 — Some lighting is stylized.**
+  Moon phase follows the Sun direction, but Earth/planet shading uses a fixed
+  direction. Align shading with geometry if visual consistency becomes a goal.
+
+## Classification and models
+
+- **MODEL-01 · T1 · P1 — Map classifications use synthetic images.**
+  `/api/classify/{id}` classifies a generated patch, not an observation of the
+  selected object. Clearly label this as a demo and distinguish it from
+  uploaded-image classification. Real claims require real observations.
+- **MODEL-02 · T1 · P2 — Synthetic training does not establish scientific validity.**
+  Supplied training uses generated patches and synthetic linear tracks.
+  Model cards already carry caveats. Obtain representative data and evaluate
+  on held-out observations before presenting scientific performance claims.
+- **MODEL-03 · T3 · P3 — Trained artifacts require explicit setup.**
+  A checkout need not contain models. Document training/artifact setup for
+  deployers. Preserve existing missing-artifact checks, dry-run publishing,
+  and explicit opt-in for public uploads.
 
 ## Accounts and storage
 
-- **The default `admin` / `admin` login is gated behind an env flag.**
-  `_ensure_admin_user` in `api.py` creates it only when `COSMIC_BOOTSTRAP_ADMIN`
-  is truthy (`1`/`true`/`yes`/`on`); otherwise startup makes no admin. It still
-  bypasses the minimum-password rule, so enable it for local work only — for a
-  real deployment name admins via `COSMIC_ADMIN_USERS` and leave the flag unset.
-- **Sessions expire after 7 days.** `db._SESSION_TTL_SECONDS` bounds a token's
-  life; `get_user_by_token` ignores rows older than that, and each login sweeps
-  expired rows, so the table no longer grows without bound. Logout still
-  invalidates a token immediately. There is no sliding refresh — the clock runs
-  from when the token was issued.
-- **SQLite is opened per query.** Every `db.*` call opens a new connection, sets
-  its pragmas, and closes it — roughly 37× the cost of a shared connection on
-  repeated reads. Fine at this scale, wasteful at any other.
-- **WAL mode is on.** `get_conn` sets `journal_mode = WAL` (real-file DBs only;
-  an in-memory test DB stays on the default journal) plus a 5s `busy_timeout`,
-  so a read no longer blocks behind a write. Still one connection per query
-  (below), so this only softens contention, it doesn't remove it.
-- **Per-user indexes exist, per-table scans do not.** `user_id` is indexed on
-  every owned table; `sessions.token_hash` and `users.username` are covered by
-  their PRIMARY KEY / UNIQUE constraints.
+- **AUTH-01 · T1 · P1 — Opt-in bootstrap credentials are predictable.**
+  `COSMIC_BOOTSTRAP_ADMIN` enables `admin` / `admin`, bypassing password-length
+  checks. It is disabled by default. Keep it off on exposed deployments and
+  configure intended admins with `COSMIC_ADMIN_USERS`; consider requiring an
+  explicit initial secret or refusing insecure production bootstrap.
+- **DB-01 · T2 · P2 — SQLite opens connections per operation.**
+  Each call opens a connection and reapplies pragmas. WAL, a 5-second busy
+  timeout, and owned-table indexes already exist. Measure realistic concurrent
+  load before changing connection lifetime; address measured contention
+  without unsafe connection sharing across threads.
 
-## Models and publishing
+## Environment and verification
 
-- **Both publishable models are trained on synthetic data.** The classifier
-  learns from generated patches and the trajectory transformer from synthetic
-  linear-motion tracks. `app/model_publish.py` requires every model to carry
-  caveats and prints them on the generated model card, so this cannot be
-  published silently — but it does mean neither model is scientifically useful
-  as shipped.
-- **Nothing is trained by default.** `models/` is absent until you run the
-  training script; the publish CLI fails with a clear error rather than
-  uploading an empty repository.
-- **Publishing is opt-in twice over.** `scripts/publish_model.py` is a dry run
-  unless given `--push`, and creates private repositories unless given
-  `--public`.
+- **TOOL-01 · T2 · P2 — TensorFlow pin constrains upgrades.**
+  Retained intentionally: TensorFlow 2.16 is the last release supporting
+  [macOS x86](https://www.tensorflow.org/install/pip). CI now configures Python
+  3.12 checks on Linux, Windows, and Intel macOS, including ML/publishing
+  imports. Those remote jobs still need to run on the PR. A newer TensorFlow
+  requires an explicit platform-support decision and compatibility testing.
+- **TOOL-04 · T2 · P2 — iCloud can stall dependency installation.**
+  The workspace's `node_modules` operations still stalled locally. The new
+  version-control-ready lockfile passed clean `npm ci` and all 192 Jest tests
+  in a temporary directory. Prefer a checkout outside cloud synchronization
+  for dependency-heavy development; do not sync virtual environments or
+  `node_modules`. This local filesystem issue is separate from reproducibility.
 
-## Environment / tooling
-
-- **macOS x86_64 numpy/TensorFlow dylib fragility.** numpy's bundled
-  `.dylibs` (libgfortran/libopenblas) were being dropped by uv's default
-  hardlink install mode, breaking `import numpy` (often only after TensorFlow
-  loaded earlier in the same process). Fixed by `link-mode = "copy"` in
-  `pyproject.toml`. If imports break again, rebuild: `rm -rf .venv && uv sync`.
-- **TensorFlow pinned to 2.16.2.** Versions ≥ 2.17 dropped macOS x86_64 wheels;
-  2.16.2 is the last release with both Linux and Intel-mac wheels.
-- **Scripts must be run as modules, from the repo root.**
-  `uv run python -m scripts.<name>` works; `uv run python scripts/<name>.py`
-  fails with `ModuleNotFoundError: No module named 'app'`, because running a
-  file directly puts `scripts/` on `sys.path` instead of the project root.
-  Scripts also import `setuptools` before anything TensorFlow-related, for the
-  same distutils reason as `app/api.py`. Model paths are relative, so the repo
-  root is the required working directory either way.
-
-## Robustness
-
-- **Partial scenes show a data availability notice.** Failed scene sources
-  appear in `/api/scene` as `source_warnings` and in a "Map incomplete" notice
-  beside the map legend, naming the affected object kinds and sources. Cached
-  results retain their warnings; a healthy scene response clears the notice.
-  Detailed errors and repeat counts remain in `/api/admin/health`. Successful
-  CelesTrak fallback to stale data or a smaller catalog is not flagged by this
-  notice.
+Script invocation and default model paths are now independent of the working
+directory. The frontend lockfile is no longer ignored and CI uses `npm ci`.
+See [environment setup](environment.md) for supported commands and platforms.

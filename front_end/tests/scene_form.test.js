@@ -43,6 +43,23 @@ describe('sceneResultHTML()', () => {
 // ── loadScene() ───────────────────────────────────────────────────────────────
 
 describe('loadScene()', () => {
+  test('shows scene time and stale element metadata, clearing on recovery', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({
+      objects: [], datetime: '2025-01-01T00:00:00Z', source_freshness: [{
+        kind: 'satellite', stale: true, downloaded_at: 1735689600,
+        oldest_epoch: '2024-01-01T00:00:00Z',
+      }],
+    }) });
+    await app.loadScene('2025-01-01T00:00:00Z');
+    const warning = document.getElementById('source-warning');
+    expect(warning.hidden).toBe(false);
+    expect(warning.textContent).toContain('Using cached orbital data');
+    expect(warning.textContent).toContain('over 7 days old');
+    expect(document.getElementById('scene-timestamp').textContent).toContain('2025-01-01');
+    global.fetch.mockResolvedValue({ ok: true, json: async () => ({ objects: [] }) });
+    await app.loadScene();
+    expect(warning.hidden).toBe(true);
+  });
   test('shows missing sources and clears the notice after recovery', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,

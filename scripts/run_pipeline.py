@@ -2,6 +2,9 @@
 """Run the cosmic forecast pipeline on synthetic frame data."""
 
 import json
+import argparse
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -10,8 +13,11 @@ import numpy as np
 # import (app.object_classifier pulls it in). Same reason as app/api.py.
 import setuptools  # noqa: F401
 
-from app.object_classifier import generate_synthetic_dataset
-from app.pipeline import FrameInput, create_default_pipeline
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.object_classifier import generate_synthetic_dataset  # noqa: E402
+from app.pipeline import FrameInput, create_default_pipeline  # noqa: E402
 
 
 def build_linear_motion_frames(
@@ -45,4 +51,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    argparse.ArgumentParser(description=__doc__).parse_args()
     main()

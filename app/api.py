@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from functools import partial
 from math import acos, asin, atan2, cos, degrees, log10, pi, radians, sin, sqrt
 from typing import Iterator, NamedTuple
+from threading import RLock
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
@@ -21,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, config, db
+from app.cache_lock import KeyLocks, synchronized
 
 # Add project root so `app.*` imports work when run from app/ directory
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -204,23 +206,41 @@ _SIMBAD_TTL_SECONDS = 6 * 60 * 60
 _JPL_TTL_SECONDS = 60 * 60
 _catalog_cache: dict[tuple, tuple[float, "CappedObjects"]] = {}
 
+_CATALOG_CACHE_MAX_ENTRIES = 256
+_FAILURE_TTL_SECONDS = 30
+_catalog_guard = RLock()
+_catalog_keys = KeyLocks()
+_catalog_expiry: dict[tuple, float] = {}
+
 
 def _clear_catalog_cache() -> None:
-    _catalog_cache.clear()
+    with _catalog_guard:
+        _catalog_cache.clear()
+        _catalog_expiry.clear()
 
 
 def _cached_catalog(key: tuple, ttl: float, fetch) -> "CappedObjects":
-    """Memoize one catalog fetch under `key` for `ttl` seconds.
-
-    Called from the scene's thread pool; a race just means two threads fetch
-    the same catalog once, which is harmless.
-    """
-    cached = _catalog_cache.get(key)
-    if cached and (time.time() - cached[0]) < ttl:
-        return cached[1]
-    result = fetch()
-    _catalog_cache[key] = (time.time(), result)
-    return result
+    """Bounded process-local cache; share misses per key and retry failures soon."""
+    with _catalog_keys.hold(key):
+        with _catalog_guard:
+            now = time.time()
+            for expired in list(_catalog_expiry):
+                if _catalog_expiry[expired] <= now:
+                    _catalog_cache.pop(expired, None)
+                    del _catalog_expiry[expired]
+            cached = _catalog_cache.get(key)
+            if cached:
+                return cached[1]
+        result = fetch()
+        lifetime = _FAILURE_TTL_SECONDS if result.unavailable_source else ttl
+        with _catalog_guard:
+            while len(_catalog_cache) >= _CATALOG_CACHE_MAX_ENTRIES:
+                oldest = min(_catalog_cache, key=lambda k: _catalog_cache[k][0])
+                del _catalog_cache[oldest]
+                _catalog_expiry.pop(oldest, None)
+            _catalog_cache[key] = (time.time(), result)
+            _catalog_expiry[key] = time.time() + lifetime
+        return result
 
 
 # ── Capped catalog sources ────────────────────────────────────────────────────
@@ -234,6 +254,7 @@ class CappedObjects(NamedTuple):
     hidden: int  # objects the cap excluded; 0 when nothing was dropped
     hidden_exact: bool  # False when `hidden` is a "there are more" floor
     unavailable_source: str | None = None
+    freshness: dict | None = None
 
 
 def _probe_cap(cap: int) -> int:
@@ -348,7 +369,12 @@ def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects
         return _source_unavailable("celestrak", kind, exc)
     available = sum(1 for _ in _iter_tle_sets(tle_text))
     objects = _propagate_tles(tle_text, dt, limit=cap, kind=kind)
-    return CappedObjects(objects, max(0, available - cap), True)
+    return CappedObjects(
+        objects,
+        max(0, available - cap),
+        True,
+        freshness=getattr(tle_text, "freshness", None),
+    )
 
 
 def _simbad_scene_objects(kind: str, cap: int) -> CappedObjects:
@@ -566,23 +592,32 @@ _SCENE_TTL_SECONDS = 45.0
 # ~100-object entry per request and never shrink.
 _SCENE_CACHE_MAX_ENTRIES = 64
 _scene_cache: dict[tuple, tuple[float, dict]] = {}
+_scene_guard = RLock()
+_scene_keys = KeyLocks()
 
 
+@synchronized(_scene_guard)
 def _clear_scene_cache() -> None:
     _scene_cache.clear()
 
 
+@synchronized(_scene_guard)
 def _cached_scene(cache_key: tuple) -> dict | None:
     """The cached scene for `cache_key`, if one is still inside its TTL."""
     cached = _scene_cache.get(cache_key)
     if cached is None:
         return None
-    if (time.time() - cached[0]) >= _SCENE_TTL_SECONDS:
+    ttl = (
+        _FAILURE_TTL_SECONDS if cached[1].get("source_warnings") else _SCENE_TTL_SECONDS
+    )
+    valid_until = cached[1].get("valid_until", float("inf"))
+    if (time.time() - cached[0]) >= ttl or time.time() >= valid_until:
         del _scene_cache[cache_key]
         return None
     return cached[1]
 
 
+@synchronized(_scene_guard)
 def _cache_scene(cache_key: tuple, result: dict) -> None:
     """Store a scene, dropping expired entries and capping total size."""
     now = time.time()
@@ -648,6 +683,8 @@ def _capped_scene_objects(
         )
         if result.unavailable_source:
             cap_rows[-1]["unavailable_source"] = result.unavailable_source
+        if result.freshness:
+            cap_rows[-1]["freshness"] = result.freshness
     return objects, cap_rows
 
 
@@ -757,6 +794,12 @@ def get_scene(
     half-angle around them.
     """
     cache_key = (datetime_str, limit, ra, dec, radius_deg)
+    with _scene_keys.hold(cache_key):
+        return _build_scene(datetime_str, limit, ra, dec, radius_deg)
+
+
+def _build_scene(datetime_str, limit, ra, dec, radius_deg):
+    cache_key = (datetime_str, limit, ra, dec, radius_deg)
     cached = _cached_scene(cache_key)
     if cached is not None:
         return cached
@@ -804,6 +847,15 @@ def get_scene(
             if row.get("unavailable_source")
         ],
     }
+    result["source_freshness"] = [
+        {"source": "celestrak", "kind": row["kind"], **row["freshness"]}
+        for row in cap_rows
+        if row.get("freshness")
+    ]
+    if result["source_freshness"]:
+        result["valid_until"] = min(
+            row["valid_until"] for row in result["source_freshness"]
+        )
     if search_ra is not None and search_dec is not None:
         total = len(objects)
         result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)

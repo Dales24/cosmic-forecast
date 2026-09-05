@@ -80,7 +80,9 @@ def _mock_response(text=""):
 def test_fetch_celestrak_satellite_calls_correct_url(tmp_path):
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
         fetch_celestrak("satellite", limit=1)
     url = mock.call_args[0][0]
@@ -195,7 +197,9 @@ def test_fetch_celestrak_rocket_body_queries_by_name(tmp_path):
     # CelesTrak has no rocket-body GROUP; it must query by the "R/B" name suffix.
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
         fetch_celestrak("rocket_body", limit=1)
     url = mock.call_args[0][0]

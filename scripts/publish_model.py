@@ -20,8 +20,12 @@ variable.
 
 import argparse
 import sys
+from pathlib import Path
 
-from app.model_publish import PUBLISHABLE_MODELS, publish_model
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.model_publish import PUBLISHABLE_MODELS, publish_model  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--push",
         action="store_true",
         help="Actually upload. Without this the run is a dry run.",
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="Project artifact root (defaults to this checkout, independent of cwd)",
     )
     parser.add_argument(
         "--public",
@@ -61,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             args.model,
             args.repo,
             token=args.token,
+            root=args.root,
             private=not args.public,
             dry_run=not args.push,
         )
