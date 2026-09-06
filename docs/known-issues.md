@@ -137,11 +137,11 @@ SIMBAD and CelesTrak fetches do not select historical catalogs.
   Retained intentionally: TensorFlow 2.16 is the last release supporting
   [macOS x86](https://www.tensorflow.org/install/pip). CI now configures Python
   3.12 checks on Linux, Windows, and Intel macOS, including ML/publishing
-  imports. Those remote jobs still need to run on the PR. A newer TensorFlow
+  imports. Check the PR results for each platform. A newer TensorFlow
   requires an explicit platform-support decision and compatibility testing.
 - **TOOL-04 · T2 · P2 — iCloud can stall dependency installation.**
   The workspace's `node_modules` operations still stalled locally. The new
-  version-control-ready lockfile passed clean `npm ci` and all 192 Jest tests
+  tracked lockfile passed clean `npm ci` and all 192 Jest tests
   in a temporary directory. Prefer a checkout outside cloud synchronization
   for dependency-heavy development; do not sync virtual environments or
   `node_modules`. This local filesystem issue is separate from reproducibility.
