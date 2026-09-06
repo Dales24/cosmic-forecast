@@ -1206,6 +1206,9 @@ def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admi
 
 
 _ADMIN_BOOTSTRAP_ENV = "COSMIC_BOOTSTRAP_ADMIN"
+_ADMIN_BOOTSTRAP_PASSWORD_ENV = "COSMIC_BOOTSTRAP_ADMIN_PASSWORD"
+_ADMIN_BOOTSTRAP_USERNAME_ENV = "COSMIC_BOOTSTRAP_ADMIN_USERNAME"
+_ADMIN_BOOTSTRAP_MIN_PASSWORD = 12
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -1214,20 +1217,29 @@ def _bootstrap_admin_enabled() -> bool:
 
 
 def _ensure_admin_user() -> None:
-    """Dev convenience: a default admin/admin login, off unless
-    ``COSMIC_BOOTSTRAP_ADMIN`` is truthy.
-
-    It's an unauthenticated admin with a guessable password and bypasses the
-    password-length rule on purpose, so it must never be enabled on a
-    deployment anyone else can reach. Set the env var only for local work;
-    for a real deployment name admins via ``COSMIC_ADMIN_USERS`` instead.
-    """
+    """Create or rotate an opt-in bootstrap admin using an explicit secret."""
     if not _bootstrap_admin_enabled():
         return
-    if db.get_user_by_username("admin"):
-        return
-    pw_hash, salt = auth.hash_password("admin")
-    db.create_user("admin", None, pw_hash, salt, is_admin=True)
+    username = os.environ.get(_ADMIN_BOOTSTRAP_USERNAME_ENV, "admin").strip()
+    password = os.environ.get(_ADMIN_BOOTSTRAP_PASSWORD_ENV, "")
+    if not username:
+        raise RuntimeError(f"{_ADMIN_BOOTSTRAP_USERNAME_ENV} cannot be empty")
+    if len(password) < _ADMIN_BOOTSTRAP_MIN_PASSWORD:
+        raise RuntimeError(
+            f"{_ADMIN_BOOTSTRAP_PASSWORD_ENV} must be at least "
+            f"{_ADMIN_BOOTSTRAP_MIN_PASSWORD} characters when "
+            f"{_ADMIN_BOOTSTRAP_ENV} is enabled"
+        )
+    pw_hash, salt = auth.hash_password(password)
+    existing = db.get_user_by_username(username)
+    if existing:
+        if auth.verify_password(password, existing["salt"], existing["password_hash"]):
+            if not existing["is_admin"]:
+                db.set_user_admin(existing["id"], True)
+        else:
+            db.set_user_credentials(existing["id"], pw_hash, salt, is_admin=True)
+    else:
+        db.create_user(username, None, pw_hash, salt, is_admin=True)
 
 
 @app.on_event("startup")

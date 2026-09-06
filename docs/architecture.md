@@ -160,12 +160,17 @@ stored. Sessions expire after seven days; logout invalidates the token.
 [`db.py`](../app/db.py) stores `users`, `sessions`, `saved_searches`,
 `saved_uploads`, and `custom_objects` in SQLite. Theme/admin fields live on the
 user row. `COSMIC_DB_PATH` selects the database (default `data/cosmic.db`).
-Connections are opened per operation; file databases use WAL and a 5-second
-busy timeout. Owned tables have user indexes.
+Application operations reuse one SQLite connection per worker thread. Failed
+operations roll back before that connection is reused; changing
+`COSMIC_DB_PATH` closes and replaces the thread's connection. Caller-owned
+connections remain available through `get_conn()` for explicit SQL work. File
+databases use WAL and a 5-second busy timeout. Owned tables have user indexes.
 
-`COSMIC_ADMIN_USERS` identifies intended admins. The default `admin` / `admin`
-bootstrap account is created only when `COSMIC_BOOTSTRAP_ADMIN` is enabled;
-that opt-in is for local development.
+`COSMIC_ADMIN_USERS` identifies admins at registration. When
+`COSMIC_BOOTSTRAP_ADMIN` is enabled, `COSMIC_BOOTSTRAP_ADMIN_PASSWORD` is
+required and must contain at least 12 characters; the optional username defaults
+to `admin`. Startup creates that account or rotates an existing account's
+credentials and grants admin status. No built-in password exists.
 
 ## Frontend
 
