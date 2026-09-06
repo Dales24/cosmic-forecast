@@ -196,7 +196,9 @@ compatible retraining/artifacts. Catalog placement is independent of CNN output.
 ## Testing and tooling
 
 - Backend coverage gate: `uv run pytest --cov=. --cov-fail-under=80`.
-- Frontend: from `front_end`, run `npm ci`, then `npm test` (Jest/jsdom).
+- Frontend: from `front_end`, run `npm test` (Jest/jsdom); it installs locked
+  tools in a temporary directory to avoid cloud-synced dependency folders.
+  Conventional local installs can use `npm ci` and `npm run test:local`.
   On Windows PowerShell with script execution disabled, use `npm.cmd`.
 - Style: Black and flake8 through the repository's pre-commit configuration.
 - Scripts support module invocation from the repo root and direct file

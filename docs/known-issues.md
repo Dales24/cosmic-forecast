@@ -139,13 +139,13 @@ SIMBAD and CelesTrak fetches do not select historical catalogs.
   3.12 checks on Linux, Windows, and Intel macOS, including ML/publishing
   imports. Check the PR results for each platform. A newer TensorFlow
   requires an explicit platform-support decision and compatibility testing.
-- **TOOL-04 · T2 · P2 — iCloud can stall dependency installation.**
-  The workspace's `node_modules` operations still stalled locally. The new
-  tracked lockfile passed clean `npm ci` and all 192 Jest tests
-  in a temporary directory. Prefer a checkout outside cloud synchronization
-  for dependency-heavy development; do not sync virtual environments or
-  `node_modules`. This local filesystem issue is separate from reproducibility.
 
 Script invocation and default model paths are now independent of the working
-directory. The frontend lockfile is no longer ignored and CI uses `npm ci`.
+directory. The frontend lockfile is tracked and CI uses `npm ci`. The default
+`npm test` command installs locked tools into a unique temporary directory,
+runs Jest against the checkout, and cleans up afterward. It avoids the observed
+iCloud `node_modules` stall without changing cloud or security settings.
+Verified locally: the default isolated command passes all 192 frontend tests,
+including when an incomplete local Jest installation exists. Temporary setup
+copies only the frontend manifest and lockfile; it does not upload iCloud files.
 See [environment setup](environment.md) for supported commands and platforms.

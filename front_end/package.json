@@ -2,7 +2,8 @@
   "name": "cosmic-forecast-frontend",
   "private": true,
   "scripts": {
-    "test": "jest --forceExit"
+    "test": "node ../scripts/test_frontend.mjs",
+    "test:local": "jest --forceExit"
   },
   "jest": {
     "testEnvironment": "jsdom",

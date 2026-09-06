@@ -54,15 +54,20 @@ the caller's working directory.
 From `front_end`:
 
 ```sh
-npm ci
 npm test -- --runInBand
 ```
 
+`npm test` installs tools with `npm ci` in a unique temporary directory, runs
+Jest against this checkout, and cleans up. It works without a local
+`node_modules` directory and uses npm's download cache on subsequent runs.
+From any directory, use `npm --prefix /path/to/checkout/front_end test`.
+
 `package-lock.json` pins the full dependency graph. Commit manifest and lockfile
-updates together. CI uses Node 22 and a clean `npm ci`. Windows PowerShell users
+updates together. CI uses Node 22 and verifies both a clean local `npm ci` with
+`npm run test:local` and the isolated default command. Windows PowerShell users
 whose execution policy blocks `npm.ps1` can use `npm.cmd` for these commands.
 
-Cloud-synced dependency directories can stall installation. Prefer a checkout
-outside iCloud for development; keeping files out of Git does not prevent a
-cloud client from syncing them. The lockfile was verified by clean installation
-in a temporary directory; the local iCloud stall remains a known limitation.
+The isolated command avoids cloud-synced dependency directories, which stalled
+installation in this iCloud checkout. It does not relocate or remove existing
+workspace dependencies. For a conventional unsynced checkout, `npm ci` followed
+by `npm run test:local` remains available.

@@ -47,7 +47,9 @@ jobs:
         working-directory: front_end
         run: |
           npm ci
-          npm test -- --runInBand
+          npm run test:local -- --runInBand
+      - name: Verify isolated test command
+        run: npm --prefix front_end test -- --runInBand
 
   # Validate the Docker image builds on version tags, only after tests pass.
   release:
