@@ -127,12 +127,23 @@ body {
   backdrop-filter: blur(8px);
 }
 
-.map-legend h2 {
+.map-legend summary {
   font-size: 0.85rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
-  margin-bottom: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.map-legend summary::marker { color: var(--accent2); }
+
+.map-legend[open] summary { margin-bottom: 0.75rem; }
+
+.map-legend summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 2px;
 }
 
 .map-legend ul {

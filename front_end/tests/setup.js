@@ -12,7 +12,12 @@ document.body.innerHTML = `
     <input id="near-pass-effects" type="checkbox">
     Cosmetic projected near-pass flashes
   </label>
-  <ul id="legend-list"></ul>
+  <details class="map-legend" open>
+    <summary>Orbital Map</summary>
+    <div class="map-legend-content">
+      <ul id="legend-list"></ul>
+    </div>
+  </details>
   <div id="theme-switch">
     <select id="theme-select">
       <option value="default">Default</option>
