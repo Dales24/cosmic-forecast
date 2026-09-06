@@ -19,29 +19,6 @@ inspection, not a security audit or load test.
 Start with DATA-01 and MODEL-01.
 Check AUTH-01 before exposing a deployment.
 
-## Caching and freshness
-
-The six original cache issues are addressed. Scene responses still reuse data
-for 45 seconds (30 seconds when sources fail), with 64 entries maximum. The UI
-shows scene time, stale-download notices, and a warning for elements older than
-7 days. Download age and element epoch are separate measurements; the 7-day
-notice is a display heuristic, not a validated propagation accuracy bound.
-
-Catalog storage is capped at 256 entries with expiry pruning. Successful SIMBAD
-and JPL results retain their 6-hour/1-hour TTLs; failed results retry after
-30 seconds. Same-key requests share work without blocking other keys' fetches.
-
-TLE downloads are validated before atomic replacement. Unchanged files reuse
-validated text/metadata in memory. Fresh downloads are reused for 2 hours;
-failed refreshes retry after 30 seconds and may serve downloads less than
-24 hours old. Older downloads are unavailable, and scene-cache expiry cannot
-extend that deadline. The 24-hour bound is on download age, not element epoch.
-
-Locks and request sharing are process-local; separate server workers have
-independent caches and can fetch the same source. Atomic file replacement keeps
-shared disk readers from seeing partial writes. Cache-hit performance and
-concurrency regression tests cover the single-process application model.
-
 ## Data sources
 
 - **DATA-01 · T2 · P1 — Satellite fallback silently reduces coverage.**
@@ -59,18 +36,14 @@ concurrency regression tests cover the single-process application model.
 
 ## Positions, dates, and search
 
-The map plots right ascension as angle and log geocentric distance as radius.
-Satellite positions use sgp4; Sun/Moon/planet positions use the local approximate
-ephemeris. JPL CAD requests cover the selected date through 30 days later.
-SIMBAD and CelesTrak fetches do not select historical catalogs.
-
 - **POS-01 · T1 · P2 — Near-Earth object directions are placeholders.**
   CAD supplies approach distance but no sky direction; placement uses a
   deterministic angle. Label placement as illustrative until per-object
   ephemerides provide real coordinates.
 - **POS-02 · T2 · P2 — Satellite dates do not select historical elements.**
   Available TLEs are propagated to any requested time. Accuracy degrades away
-  from their epoch. Show epoch/age and warn outside a validated time interval.
+  from their epoch. Define and validate a propagation interval; the current
+  seven-day element-age notice does not establish an accuracy guarantee.
 - **POS-03 · T2 · P2 — JPL/SIMBAD objects stay static in simulation.**
   Their scene velocities are zero. This is a display simplification for distant
   objects, but does not model near-Earth motion. Add JPL ephemeris-based motion
@@ -85,10 +58,6 @@ SIMBAD and CelesTrak fetches do not select historical catalogs.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
   Validate `app/ephemeris.py` against a reference over the supported date range
   before advertising an accuracy bound or supporting telescope pointing.
-- **POS-07 · T3 · P3 — Alternate object endpoint is unused by the UI.**
-  The frontend uses `/api/scene`, not `/api/objects/{slug}`. Document intended
-  consumers and keep date/source semantics consistent; this is not itself a
-  broken date-selection flow.
 
 ## Scene effects and presentation
 
@@ -111,12 +80,8 @@ SIMBAD and CelesTrak fetches do not select historical catalogs.
   uploaded-image classification. Real claims require real observations.
 - **MODEL-02 · T1 · P2 — Synthetic training does not establish scientific validity.**
   Supplied training uses generated patches and synthetic linear tracks.
-  Model cards already carry caveats. Obtain representative data and evaluate
+  Obtain representative data and evaluate
   on held-out observations before presenting scientific performance claims.
-- **MODEL-03 · T3 · P3 — Trained artifacts require explicit setup.**
-  A checkout need not contain models. Document training/artifact setup for
-  deployers. Preserve existing missing-artifact checks, dry-run publishing,
-  and explicit opt-in for public uploads.
 
 ## Accounts and storage
 
@@ -126,8 +91,7 @@ SIMBAD and CelesTrak fetches do not select historical catalogs.
   configure intended admins with `COSMIC_ADMIN_USERS`; consider requiring an
   explicit initial secret or refusing insecure production bootstrap.
 - **DB-01 · T2 · P2 — SQLite opens connections per operation.**
-  Each call opens a connection and reapplies pragmas. WAL, a 5-second busy
-  timeout, and owned-table indexes already exist. Measure realistic concurrent
+  Each call opens a connection and reapplies pragmas. Measure realistic concurrent
   load before changing connection lifetime; address measured contention
   without unsafe connection sharing across threads.
 
@@ -135,17 +99,5 @@ SIMBAD and CelesTrak fetches do not select historical catalogs.
 
 - **TOOL-01 · T2 · P2 — TensorFlow pin constrains upgrades.**
   Retained intentionally: TensorFlow 2.16 is the last release supporting
-  [macOS x86](https://www.tensorflow.org/install/pip). CI now configures Python
-  3.12 checks on Linux, Windows, and Intel macOS, including ML/publishing
-  imports. Check the PR results for each platform. A newer TensorFlow
+  [macOS x86](https://www.tensorflow.org/install/pip). A newer TensorFlow
   requires an explicit platform-support decision and compatibility testing.
-
-Script invocation and default model paths are now independent of the working
-directory. The frontend lockfile is tracked and CI uses `npm ci`. The default
-`npm test` command installs locked tools into a unique temporary directory,
-runs Jest against the checkout, and cleans up afterward. It avoids the observed
-iCloud `node_modules` stall without changing cloud or security settings.
-Verified locally: the default isolated command passes all 192 frontend tests,
-including when an incomplete local Jest installation exists. Temporary setup
-copies only the frontend manifest and lockfile; it does not upload iCloud files.
-See [environment setup](environment.md) for supported commands and platforms.
