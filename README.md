@@ -8,6 +8,13 @@ For the full picture — the CNN → track → transformer → Kalman pipeline, 
 sources, API surface, accounts, and how to add a new detection — see
 [docs/architecture.md](docs/architecture.md).
 
+## Development context
+
+Repository-specific instructions for Codex and other contributors live in
+[`Codex/AGENTS.md`](Codex/AGENTS.md). The root [`AGENTS.md`](AGENTS.md) loads
+that file for every change. Keep the context file synchronized with supported
+commands, architecture, verification requirements, and project safeguards.
+
 ```
 app/
   api.py                     FastAPI backend — API routes + static file serving
