@@ -319,6 +319,30 @@ async function loadScene(datetimeISO, search) {
     }
     const data = await resp.json();
     sceneObjects = data.objects || [];
+    const timestamp = document.getElementById("scene-timestamp");
+    if (timestamp) timestamp.textContent = data.datetime
+      ? "Scene time: " + new Date(data.datetime).toISOString() : "";
+    const warning = document.getElementById("source-warning");
+    if (warning) {
+      const missing = (data.source_warnings || []).map(item =>
+        (KIND_NAMES[item.kind] || item.kind) + " (" + item.source + ")"
+      );
+      const stale = (data.source_freshness || []).filter(item => item.stale);
+      const oldElements = (data.source_freshness || []).filter(item =>
+        Date.now() - Date.parse(item.oldest_epoch) > 7 * 86400000
+      );
+      warning.hidden = missing.length === 0 && stale.length === 0 && oldElements.length === 0;
+      const messages = [];
+      if (missing.length) messages.push(
+        "Map incomplete: data unavailable for " + missing.join(", ") + ". Try again later."
+      );
+      if (stale.length) messages.push("Using cached orbital data for " + stale.map(item =>
+        (KIND_NAMES[item.kind] || item.kind) + " (downloaded " +
+        new Date(item.downloaded_at * 1000).toISOString() + ")"
+      ).join(", ") + ". Refresh failed; download age is limited to 24 hours.");
+      if (oldElements.length) messages.push("Some orbital elements are over 7 days old; positions may be less accurate.");
+      warning.textContent = messages.join(" ");
+    }
     matched = data.search || null;
     await mergeCustomObjects(); // the user's own saved objects
     syncLocalBodies(); // point the Sun/Moon artwork at their real positions

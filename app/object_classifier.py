@@ -18,10 +18,11 @@ from app.object_classes import (
     NUM_CLASSES,
     SLUG_TO_INDEX,
 )
+from app.paths import MODEL_ROOT
 
 PATCH_SIZE = (64, 64)
-DEFAULT_MODEL_DIR = Path("models/object_classifier")
-DEFAULT_ARCHIVE_DIR = Path("models/archive")
+DEFAULT_MODEL_DIR = MODEL_ROOT / "object_classifier"
+DEFAULT_ARCHIVE_DIR = MODEL_ROOT / "archive"
 MODEL_FILENAME = "model.keras"
 METADATA_FILENAME = "metadata.json"
 

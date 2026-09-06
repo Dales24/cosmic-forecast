@@ -72,13 +72,17 @@ Things in the current codebase that this plan directly affects:
   Behind more than one instance each replica keeps its own, so hit rates drop
   and freshness varies between replicas. ElastiCache or accepting the drift are
   both fine, but it should be a decision, not a surprise.
-- **`_ensure_admin_user()` creates a default `admin`/`admin` login on startup**
-  and deliberately bypasses the password-length rule. This must be removed or
-  gated before any real deployment.
+- **`_ensure_admin_user()` can create a default `admin`/`admin` login on
+  startup**, but only when `COSMIC_BOOTSTRAP_ADMIN` is truthy; it is unset in
+  every non-local environment. It still bypasses the password-length rule, so
+  the flag must stay unset on any real deployment — grant admin via
+  `COSMIC_ADMIN_USERS` instead.
 
 ## Still-open database work (pre-deployment)
 
-- Session expiry + pruning (needs a TTL decision; 30 days is typical).
-- WAL journal mode — writers currently block readers.
+- ~~Session expiry + pruning~~ — done: 7-day TTL in `db._SESSION_TTL_SECONDS`,
+  expired rows swept on each login.
+- ~~WAL journal mode~~ — done: `get_conn` sets `journal_mode = WAL` and a 5s
+  `busy_timeout`.
 - Connection reuse; a new connection is opened per query (~37x overhead on
   repeated reads).

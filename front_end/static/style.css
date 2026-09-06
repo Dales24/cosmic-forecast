@@ -142,6 +142,17 @@ body {
 }
 
 /* Fixed decorative items */
+#source-warning {
+  max-width: 240px;
+  padding: 0.6rem;
+  border: 1px solid #ffd166;
+  border-radius: 6px;
+  background: #292317;
+  color: #ffe3a0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .map-legend li::before { content: "●"; margin-right: 0.5rem; }
 .map-legend li.earth::before  { color: #4da3ff; }
 .map-legend li.orbit::before  { color: rgba(140, 180, 255, 0.6); }

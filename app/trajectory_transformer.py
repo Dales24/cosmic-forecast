@@ -7,10 +7,11 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers
+from app.paths import MODEL_ROOT
 
 DEFAULT_SEQ_LEN = 8
 DEFAULT_HORIZON = 3
-DEFAULT_MODEL_DIR = Path("models/trajectory_transformer")
+DEFAULT_MODEL_DIR = MODEL_ROOT / "trajectory_transformer"
 
 
 def create_trajectory_transformer(

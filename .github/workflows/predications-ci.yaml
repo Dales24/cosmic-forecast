@@ -2,15 +2,21 @@ on:
   push:
     branches:
       - main
+      - develop
     tags:
       - "v*"
   pull_request:
     branches:
       - main
+      - develop
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
       - name: Install uv
@@ -18,7 +24,9 @@ jobs:
         with:
           python-version: 3.12
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --group publish
+      - name: Verify ML and publishing imports
+        run: uv run --frozen --group publish python -c "import setuptools; import numpy; import tensorflow as tf; import huggingface_hub; print(tf.__version__, numpy.__version__, huggingface_hub.__version__)"
       - name: Lint
         run: |
           uv run black --check app/ tests/ scripts/
@@ -26,9 +34,26 @@ jobs:
       - name: Test with coverage
         run: uv run pytest --cov=. --cov-fail-under=80
 
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: front_end/package-lock.json
+      - name: Clean install and test
+        working-directory: front_end
+        run: |
+          npm ci
+          npm run test:local -- --runInBand
+      - name: Verify isolated test command
+        run: npm --prefix front_end test -- --runInBand
+
   # Validate the Docker image builds on version tags, only after tests pass.
   release:
-    needs: test
+    needs: [test, frontend]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

@@ -79,10 +79,13 @@ def test_trained_model_classifies_kind_patches_as_that_kind():
     """
     import tensorflow as tf
 
+    tf.keras.backend.clear_session()
     tf.keras.utils.set_random_seed(1234)
 
     model = create_cnn_model()
     images, labels = generate_synthetic_dataset(samples_per_class=20)
-    train_model(model, images, labels, epochs=8)
+    # Eight epochs left a held-out galaxy misclassified on Intel macOS.
+    # Allow convergence across CPU backends without relaxing held-out checks.
+    train_model(model, images, labels, epochs=16)
     for slug in ("satellite", "galaxy", "comet", "ufo"):
         assert predict_patch(model, synthetic_patch(slug, seed=7))["slug"] == slug

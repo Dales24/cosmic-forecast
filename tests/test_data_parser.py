@@ -80,21 +80,32 @@ def _mock_response(text=""):
 def test_fetch_celestrak_satellite_calls_correct_url(tmp_path):
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
         fetch_celestrak("satellite", limit=1)
     url = mock.call_args[0][0]
     assert "active" in url
 
 
-def test_fetch_celestrak_iss_calls_stations_url(tmp_path):
+@pytest.mark.parametrize(
+    ("slug", "group"),
+    [("iss", "stations"), ("space_debris", "cosmos-2251-debris")],
+)
+def test_fetch_celestrak_uses_gp_group_url(tmp_path, slug, group):
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
-        fetch_celestrak("iss", limit=1)
-    url = mock.call_args[0][0]
-    assert "stations" in url
+        result = fetch_celestrak(slug, limit=1)
+    mock.assert_called_once_with(
+        f"https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=tle",
+        timeout=10,
+    )
+    assert result[0]["catalog_id"] == "25544"
 
 
 def test_fetch_celestrak_parses_response(tmp_path):
@@ -186,7 +197,9 @@ def test_fetch_celestrak_rocket_body_queries_by_name(tmp_path):
     # CelesTrak has no rocket-body GROUP; it must query by the "R/B" name suffix.
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
         fetch_celestrak("rocket_body", limit=1)
     url = mock.call_args[0][0]

@@ -28,11 +28,12 @@ _AT = datetime(2026, 8, 2, tzinfo=timezone.utc)
 
 
 @pytest.fixture
-def trained(tmp_path):
+def trained(tmp_path, monkeypatch):
     """A project root with a saved classifier, as training would leave it."""
     directory = tmp_path / PUBLISHABLE_MODELS["classifier"].directory
     directory.mkdir(parents=True)
     (directory / MODEL_FILENAME).write_bytes(b"fake weights")
+    monkeypatch.setattr("app.paths.PROJECT_ROOT", tmp_path)
     return tmp_path
 
 
