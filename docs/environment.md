@@ -1,5 +1,9 @@
 # Development environment
 
+Read the repository's [Codex context](../Codex/AGENTS.md) before making changes.
+It summarizes the project structure, working rules, verification expectations,
+and commands; this document provides the detailed environment setup.
+
 Use Python 3.12 and the checked-in `uv.lock`:
 
 ```sh

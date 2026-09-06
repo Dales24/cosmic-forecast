@@ -8,6 +8,13 @@ For the full picture — the CNN → track → transformer → Kalman pipeline, 
 sources, API surface, accounts, and how to add a new detection — see
 [docs/architecture.md](docs/architecture.md).
 
+## Development context
+
+Repository-specific instructions for Codex and other contributors live in
+[`Codex/AGENTS.md`](Codex/AGENTS.md). The root [`AGENTS.md`](AGENTS.md) loads
+that file for every change. Keep the context file synchronized with supported
+commands, architecture, verification requirements, and project safeguards.
+
 ```
 app/
   api.py                     FastAPI backend — API routes + static file serving
@@ -85,8 +92,8 @@ front_end/
 | `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
 
 A position search adds a `search` block to the response (`matched`, `searched`,
-`radius_deg`). Objects with no real sky position — JPL near-Earth objects and
-the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-issues.md).
+`radius_deg`). Objects without real sky positions, including JPL near-Earth
+objects, are excluded; see [docs/known-issues.md](docs/known-issues.md).
 
 `GET /api/objects/{slug}` — `date=YYYY-MM-DD`, `limit=20`.
 

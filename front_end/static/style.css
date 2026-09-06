@@ -232,6 +232,23 @@ body {
   border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 
+.effect-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 8px;
+  background: rgba(8, 14, 32, 0.55);
+  color: #93a8ce;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.effect-toggle input { margin: 0.1rem 0 0; accent-color: var(--accent); }
+
 /* ── Theme switcher ──────────────────────────────────────────────────────────── */
 .theme-switch {
   display: flex;

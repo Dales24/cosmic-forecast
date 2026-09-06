@@ -245,34 +245,15 @@ def test_forecast_empty_objects_list():
 # ── GET /api/scene ────────────────────────────────────────────────────────────
 
 
-def test_scene_always_includes_ufo():
-    """UFO entry is appended even when every data source fails."""
+def test_scene_does_not_fabricate_unidentified_objects():
+    """The live scene contains only sourced or computed objects."""
     with _offline_catalogs(
         patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
     ):
         r = client.get("/api/scene")
     assert r.status_code == 200
     kinds = [o["kind"] for o in r.json()["objects"]]
-    assert "ufo" in kinds
-
-
-def test_scene_ufo_has_required_fields():
-    with _offline_catalogs(
-        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
-    ):
-        r = client.get("/api/scene")
-    ufo = next(o for o in r.json()["objects"] if o["kind"] == "ufo")
-    for field in (
-        "id",
-        "name",
-        "kind",
-        "x_norm",
-        "y_norm",
-        "vx_norm",
-        "vy_norm",
-        "source",
-    ):
-        assert field in ufo, f"missing field: {field}"
+    assert "ufo" not in kinds
 
 
 def test_scene_accepts_datetime_str():

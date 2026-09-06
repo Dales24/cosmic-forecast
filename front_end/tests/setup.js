@@ -8,6 +8,10 @@ document.body.innerHTML = `
   <canvas id="space-map" width="800" height="600"></canvas>
   <button id="play-btn">&#9654; Play Simulation</button>
   <div id="sim-time" style="display:none"></div>
+  <label for="near-pass-effects">
+    <input id="near-pass-effects" type="checkbox">
+    Cosmetic projected near-pass flashes
+  </label>
   <ul id="legend-list"></ul>
   <div id="theme-switch">
     <select id="theme-select">

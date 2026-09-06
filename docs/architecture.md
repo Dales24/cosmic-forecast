@@ -34,7 +34,7 @@ caps, overridable through `COSMIC_CAP_<KIND>`.
 3. `_capped_scene_objects` fetches CelesTrak, JPL, and SIMBAD kinds concurrently
    using a thread pool. Source results carry objects, cap counts, and optional
    failure metadata. `limit` overrides the satellite cap only.
-4. Local Earth, Sun, Moon, planet, and intentional UFO objects are added.
+4. Local Earth, Sun, Moon, and planet objects are added.
 5. Optional position search uses great-circle separation in RA/Dec. Objects
    without usable coordinates are excluded; Earth remains as the observer.
 6. The route returns `datetime`, `objects`, `source_warnings`, `source_freshness`, optional `valid_until`, and an optional
@@ -178,10 +178,10 @@ The browser runtime is a canvas SPA in [`app.js`](../front_end/static/app.js),
 with [`auth.js`](../front_end/static/auth.js) supplying account interactions.
 It handles scene loading, a source-availability notice, pan/zoom, kind filters,
 position search, simulation, themes, image/CSV uploads, and custom objects.
-Sun/Moon artwork is synchronized with scene bodies. Some lighting and motif
-effects are stylized; collision bursts use projected proximity, not conjunction
-analysis. Browser runtime code has no package dependencies; frontend tests use
-Jest and jsdom.
+Sun/Moon artwork and body lighting are synchronized with scene geometry. Theme
+motifs are decorative; opt-in near-pass flashes use projected proximity, not
+conjunction analysis. Browser runtime code has no package dependencies;
+frontend tests use Jest and jsdom.
 
 ## Adding a scene kind
 
