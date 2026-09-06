@@ -69,6 +69,19 @@ describe('drawPlanetBody()', () => {
     app.drawPlanetBody('Saturn', 400, 300, 500);
     expect(ctx.rect.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
+
+  test('moves the highlight toward the supplied Sun position', () => {
+    ctx.createRadialGradient.mockClear();
+    app.drawPlanetBody('Mars', 400, 300, 500, 700, 300);
+    const litFromRight = ctx.createRadialGradient.mock.calls[0][0];
+
+    ctx.createRadialGradient.mockClear();
+    app.drawPlanetBody('Mars', 400, 300, 500, 100, 300);
+    const litFromLeft = ctx.createRadialGradient.mock.calls[0][0];
+
+    expect(litFromRight).toBeGreaterThan(400);
+    expect(litFromLeft).toBeLessThan(400);
+  });
 });
 
 describe('planet hit-testing', () => {
@@ -137,6 +150,27 @@ describe('drawSun()', () => {
     ctx.fill.mockClear();
     expect(() => app.drawSun(400, 300, 500)).not.toThrow();
     expect(ctx.fill.mock.calls.length).toBeGreaterThanOrEqual(2); // corona + core
+  });
+});
+
+describe('drawEarth()', () => {
+  const ctx = document.getElementById('space-map').getContext('2d');
+
+  test('moves the ocean highlight with the scene Sun', () => {
+    const original = { x: app.SUN.x, y: app.SUN.y };
+    app.SUN.x = 0.5; app.SUN.y = 0;
+    ctx.createRadialGradient.mockClear();
+    app.drawEarth(400, 300, 500);
+    const litFromRight = ctx.createRadialGradient.mock.calls[1][0];
+
+    app.SUN.x = -0.5; app.SUN.y = 0;
+    ctx.createRadialGradient.mockClear();
+    app.drawEarth(400, 300, 500);
+    const litFromLeft = ctx.createRadialGradient.mock.calls[1][0];
+    app.SUN.x = original.x; app.SUN.y = original.y;
+
+    expect(litFromRight).toBeGreaterThan(400);
+    expect(litFromLeft).toBeLessThan(400);
   });
 });
 

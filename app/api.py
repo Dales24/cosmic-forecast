@@ -823,21 +823,6 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg):
     objects.append(_moon_scene_object(dt))
     objects.extend(_planet_scene_objects(dt))
 
-    # Unidentified — position intentionally unknown
-    objects.append(
-        {
-            "id": "UNIDENTIFIED-1",
-            "name": "Unidentified \U0001f47d",
-            "kind": "ufo",
-            "x_norm": 0.28,
-            "y_norm": -0.20,
-            "vx_norm": 0.0,
-            "vy_norm": 0.0,
-            "speed_kms": 0.0,
-            "source": "unknown",
-        }
-    )
-
     result = {
         "datetime": dt.isoformat(),
         "objects": objects,

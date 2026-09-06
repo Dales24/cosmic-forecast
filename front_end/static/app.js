@@ -737,8 +737,15 @@ function drawVignette() {
 
 const EARTH_DISC_R = 0.045; // Earth's disc radius in scene-scale units
 
+function _lightUnit(bodyX, bodyY, sunX, sunY) {
+  const dx = sunX - bodyX, dy = sunY - bodyY;
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: dx / length, y: dy / length };
+}
+
 function drawEarth(cx, cy, scale) {
   const r = scale * EARTH_DISC_R;
+  const light = _lightUnit(cx, cy, cx + SUN.x * scale, cy + SUN.y * scale);
 
   // Outer atmosphere glow.
   const glow = ctx.createRadialGradient(cx, cy, r * .9, cx, cy, r * 2.6);
@@ -748,8 +755,8 @@ function drawEarth(cx, cy, scale) {
   ctx.fillStyle = glow;
   ctx.beginPath(); ctx.arc(cx, cy, r * 2.6, 0, Math.PI * 2); ctx.fill();
 
-  // Ocean base, lit from the upper-left.
-  const eg = ctx.createRadialGradient(cx - r * .35, cy - r * .35, r * .15, cx, cy, r);
+  // Ocean base, lit from the scene Sun.
+  const eg = ctx.createRadialGradient(cx + light.x * r * .35, cy + light.y * r * .35, r * .15, cx, cy, r);
   eg.addColorStop(0, "#8fd0ff"); eg.addColorStop(0.5, "#2f74c0"); eg.addColorStop(1, "#0a2038");
   ctx.fillStyle = eg;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
@@ -767,30 +774,38 @@ function drawEarth(cx, cy, scale) {
   }
 
   // Day/night terminator — darken away from the sunlit side.
-  const term = ctx.createRadialGradient(cx - r * .5, cy - r * .5, r * .2, cx + r * .6, cy + r * .6, r * 1.8);
+  const term = ctx.createRadialGradient(
+    cx + light.x * r * .5, cy + light.y * r * .5, r * .2,
+    cx - light.x * r * .6, cy - light.y * r * .6, r * 1.8
+  );
   term.addColorStop(0, "rgba(2,6,16,0)");
   term.addColorStop(0.6, "rgba(2,6,16,0.15)");
   term.addColorStop(1, "rgba(2,6,16,0.8)");
   ctx.fillStyle = term;
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 
-  // City lights on the night side (positive offsets = away from the Sun).
+  // City lights rotate with the night side.
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   ctx.fillStyle = "rgba(255,214,140,0.9)";
-  for (const [dx, dy] of [[.35, .3], [.5, .15], [.2, .55], [.6, .42], [.45, .62], [.3, .4], [.68, .22], [.16, .34]]) {
+  const awayX = -light.x, awayY = -light.y;
+  const acrossX = -awayY, acrossY = awayX;
+  for (const [along, across] of [[.35, .1], [.5, -.12], [.25, .22], [.6, .08], [.45, -.24], [.3, -.05], [.68, .2], [.2, -.2]]) {
     ctx.beginPath();
-    ctx.arc(cx + dx * r, cy + dy * r, r * 0.03, 0, Math.PI * 2);
+    ctx.arc(cx + (awayX * along + acrossX * across) * r,
+      cy + (awayY * along + acrossY * across) * r,
+      r * 0.03, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
 
   // Specular highlight.
-  const spec = ctx.createRadialGradient(cx - r * .4, cy - r * .45, 0, cx - r * .4, cy - r * .45, r * .5);
+  const specX = cx + light.x * r * .42, specY = cy + light.y * r * .42;
+  const spec = ctx.createRadialGradient(specX, specY, 0, specX, specY, r * .5);
   spec.addColorStop(0, "rgba(255,255,255,0.5)");
   spec.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = spec;
-  ctx.beginPath(); ctx.arc(cx - r * .4, cy - r * .45, r * .5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(specX, specY, r * .5, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 
   // Thin bright atmosphere rim.
@@ -819,17 +834,20 @@ const PLANET_STYLES = {
   Neptune: { r: .025, hi: "#bfe0ff", mid: "#5f92d8", lo: "#213f7a" },
 };
 
-// A lit sphere: highlight upper-left, shading toward the far edge.
-function _shadedSphere(cx, cy, r, hi, mid, lo) {
-  const g = ctx.createRadialGradient(cx - r * .4, cy - r * .4, r * .1, cx, cy, r);
+// A lit sphere with its highlight facing the scene Sun.
+function _shadedSphere(cx, cy, r, hi, mid, lo, light = { x: -.707, y: -.707 }) {
+  const g = ctx.createRadialGradient(cx + light.x * r * .4, cy + light.y * r * .4, r * .1, cx, cy, r);
   g.addColorStop(0, hi); g.addColorStop(0.55, mid); g.addColorStop(1, lo);
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
 }
 
 // Day/night shading, matching Earth's terminator so the lighting reads as one sun.
-function _planetShadow(cx, cy, r) {
-  const t = ctx.createRadialGradient(cx - r * .5, cy - r * .5, r * .2, cx + r * .6, cy + r * .6, r * 1.7);
+function _planetShadow(cx, cy, r, light) {
+  const t = ctx.createRadialGradient(
+    cx + light.x * r * .5, cy + light.y * r * .5, r * .2,
+    cx - light.x * r * .6, cy - light.y * r * .6, r * 1.7
+  );
   t.addColorStop(0, "rgba(2,4,10,0)");
   t.addColorStop(0.65, "rgba(2,4,10,0.12)");
   t.addColorStop(1, "rgba(2,4,10,0.72)");
@@ -878,13 +896,14 @@ function _planetRing(cx, cy, r, color, front) {
 // Draw one planet's disc at a screen position, from its PLANET_STYLES entry.
 // Positions come from the scene object, so planets are hit-testable like any
 // other object and drawn here only for their look.
-function drawPlanetBody(name, px, py, scale) {
+function drawPlanetBody(name, px, py, scale, sunX = px - 1, sunY = py - 1) {
   const p = PLANET_STYLES[name];
   if (!p) return;
   const r = p.r * scale;
+  const light = _lightUnit(px, py, sunX, sunY);
 
   if (p.ring) _planetRing(px, py, r, p.ring, false);
-  _shadedSphere(px, py, r, p.hi, p.mid, p.lo);
+  _shadedSphere(px, py, r, p.hi, p.mid, p.lo, light);
 
   // Belts and shading stay inside the disc.
   ctx.save();
@@ -892,7 +911,7 @@ function drawPlanetBody(name, px, py, scale) {
   if (p.bands) _planetBands(px, py, r);
   if (p.spot) _redSpot(px, py, r);
   if (p.craters) _craters(px, py, r, "rgba(50,44,38,0.35)");
-  _planetShadow(px, py, r);
+  _planetShadow(px, py, r, light);
   ctx.restore();
 
   if (p.ring) _planetRing(px, py, r, p.ring, true);
@@ -905,8 +924,7 @@ function planetRadius(name) {
   return p ? p.r : 0;
 }
 
-// The Sun sits upper-left — the same direction every body is lit from, so the
-// shading across Earth, the Moon, and the planets all reads as one light source.
+// Defaults are replaced with scene positions after every load.
 const SUN = { x: -.52, y: -.40, r: .05 };
 
 function drawSun(cx, cy, scale) {
@@ -939,17 +957,15 @@ function drawMoon(cx, cy, scale) {
   // Soft glow so it's easy to spot next to Earth.
   _additive(() => _bloom(x, y, r * 2.4, "#dfe3ee", 0.22));
 
-  _shadedSphere(x, y, r, "#e8e8ee", "#9a9aa6", "#3a3a44");
+  const light = _lightUnit(x, y, cx + SUN.x * scale, cy + SUN.y * scale);
+  _shadedSphere(x, y, r, "#e8e8ee", "#9a9aa6", "#3a3a44", light);
 
   ctx.save();
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
   _craters(x, y, r, "rgba(60,60,72,0.35)");
 
   // Lunar phase: the night side faces away from the Sun.
-  let lx = (cx + SUN.x * scale) - x, ly = (cy + SUN.y * scale) - y;
-  const len = Math.hypot(lx, ly) || 1;
-  lx /= len; ly /= len;
-  const sx = x - lx * r * 1.1, sy = y - ly * r * 1.1; // shadow centre, anti-Sun
+  const sx = x - light.x * r * 1.1, sy = y - light.y * r * 1.1; // shadow centre, anti-Sun
   const shade = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r * 1.9);
   shade.addColorStop(0, "rgba(5,6,12,0.92)");
   shade.addColorStop(0.6, "rgba(5,6,12,0.5)");
@@ -1416,7 +1432,7 @@ function drawSceneObjects(cx, cy, scale, realTime) {
     }
 
     if (obj.kind === "planet") {
-      drawPlanetBody(obj.name, wx, wy, scale);
+      drawPlanetBody(obj.name, wx, wy, scale, sunX, sunY);
     } else if (!isBody) {
       // Sun/Earth/Moon are painted by their own draw functions in frame().
       drawGlyph(obj.kind, wx, wy, style, phase, sunX, sunY);
@@ -1424,14 +1440,14 @@ function drawSceneObjects(cx, cy, scale, realTime) {
     }
   }
 
-  // Collisions are a property of the running simulation, not of a frozen scene.
-  if (moving) {
+  // Projected near-pass flashes are optional and only run during simulation.
+  if (moving && nearPassEffectsEnabled) {
     const approaches = findApproaches(
       sceneObjects, objPositions, COLLISION_DIST_SCENE * scale, separatedPairs
     );
     spawnExplosions(approaches, realTime, currentTheme.explosionColor);
   }
-  drawExplosions(realTime, scale);
+  if (nearPassEffectsEnabled) drawExplosions(realTime, scale);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
@@ -1692,6 +1708,15 @@ async function fetchForecast() {
 
 const playBtn   = document.getElementById("play-btn");
 const simTimeEl = document.getElementById("sim-time");
+const nearPassEffects = document.getElementById("near-pass-effects");
+let nearPassEffectsEnabled = Boolean(nearPassEffects && nearPassEffects.checked);
+
+if (nearPassEffects) {
+  nearPassEffects.addEventListener("change", () => {
+    nearPassEffectsEnabled = nearPassEffects.checked;
+    if (!nearPassEffectsEnabled) clearExplosions();
+  });
+}
 
 // Freeze the simulation at a moment and put the controls in the paused state.
 // Four flows land here — load scene, clear search, CSV upload, page init — so
@@ -1998,7 +2023,7 @@ if (typeof module !== "undefined") {
     effectiveTime,
     findObjectAt,
     setTheme, kindStyle, mixHex, DISTANCE_BANDS, customObjectXY, addToScene,
-    drawPlanetBody, planetRadius, bodyDiscR, syncLocalBodies, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
+    drawEarth, drawPlanetBody, planetRadius, bodyDiscR, syncLocalBodies, drawSun, drawMoon, drawGlyph, drawVignette, drawShootingStars, drawSunFlare,
     // Async handlers
     loadScene, handleCSVUpload, classifyUploadFile,
     updateLegend, hideObjectInfo, showObjectInfo,
@@ -2029,6 +2054,7 @@ if (typeof module !== "undefined") {
     set simStartReal(v) { simStartReal = v; },
     get simStartEff()   { return simStartEff; },
     set simStartEff(v)  { simStartEff = v; },
+    get nearPassEffectsEnabled() { return nearPassEffectsEnabled; },
     get forecastPaths() { return forecastPaths; },
     set forecastPaths(v){ forecastPaths = v; },
     get currentTheme()  { return currentTheme; },

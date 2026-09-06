@@ -53,24 +53,11 @@ Check AUTH-01 before exposing a deployment.
   the sky; spherical position-search results need not look circular on the map.
   Explain the projection or add an RA/Dec sky view.
 - **POS-05 · T2 · P2 — Search omits objects without coordinates.**
-  Near-Earth objects and the intentional UFO placeholder are excluded; Earth
-  remains as observer. Report excluded categories so empty results are clear.
+  Near-Earth objects are excluded; Earth remains as observer. Report excluded
+  categories so empty results are clear.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
   Validate `app/ephemeris.py` against a reference over the supported date range
   before advertising an accuracy bound or supporting telescope pointing.
-
-## Scene effects and presentation
-
-- **FX-01 · T1 · P2 — Explosions can imply real collision predictions.**
-  Bursts use projected map distance, not physical conjunction analysis.
-  Approach/reseparation and cooldown guards do not establish collision risk.
-  Label effects as cosmetic or disable them by default; trajectories continue.
-- **FX-02 · T3 · P3 — UFO and motifs are intentional decoration.**
-  UFO placement is fixed at `(0.28, -0.20)`; motifs decorate moving kinds only.
-  The default theme has none. Preserve clear illustrative labeling.
-- **FX-03 · T3 · P3 — Some lighting is stylized.**
-  Moon phase follows the Sun direction, but Earth/planet shading uses a fixed
-  direction. Align shading with geometry if visual consistency becomes a goal.
 
 ## Classification and models
 
