@@ -17,7 +17,6 @@ inspection, not a security audit or load test.
 | P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
 Start with DATA-01 and MODEL-01.
-Check AUTH-01 before exposing a deployment.
 
 ## Data sources
 
