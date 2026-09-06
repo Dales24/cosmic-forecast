@@ -17,7 +17,6 @@ inspection, not a security audit or load test.
 | P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
 Start with DATA-01 and MODEL-01.
-Check AUTH-01 before exposing a deployment.
 
 ## Data sources
 
@@ -82,18 +81,6 @@ Check AUTH-01 before exposing a deployment.
   Supplied training uses generated patches and synthetic linear tracks.
   Obtain representative data and evaluate
   on held-out observations before presenting scientific performance claims.
-
-## Accounts and storage
-
-- **AUTH-01 · T1 · P1 — Opt-in bootstrap credentials are predictable.**
-  `COSMIC_BOOTSTRAP_ADMIN` enables `admin` / `admin`, bypassing password-length
-  checks. It is disabled by default. Keep it off on exposed deployments and
-  configure intended admins with `COSMIC_ADMIN_USERS`; consider requiring an
-  explicit initial secret or refusing insecure production bootstrap.
-- **DB-01 · T2 · P2 — SQLite opens connections per operation.**
-  Each call opens a connection and reapplies pragmas. Measure realistic concurrent
-  load before changing connection lifetime; address measured contention
-  without unsafe connection sharing across threads.
 
 ## Environment and verification
 
