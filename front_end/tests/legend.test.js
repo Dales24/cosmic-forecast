@@ -177,3 +177,20 @@ describe('updateLegend()', () => {
     expect(allRow.classList.contains('active')).toBe(false);
   });
 });
+
+describe('map legend panel', () => {
+  const panel = document.querySelector('.map-legend');
+
+  test('uses an accessible native disclosure that starts expanded', () => {
+    expect(panel.tagName).toBe('DETAILS');
+    expect(panel.open).toBe(true);
+    expect(panel.querySelector('summary').textContent).toMatch(/orbital map/i);
+  });
+
+  test('can be collapsed without removing the legend contents', () => {
+    panel.open = false;
+    expect(panel.open).toBe(false);
+    expect(panel.querySelector('#legend-list')).not.toBeNull();
+    panel.open = true;
+  });
+});

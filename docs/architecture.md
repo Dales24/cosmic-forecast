@@ -46,7 +46,7 @@ The frontend merges the signed-in user's custom objects after loading the scene.
 
 | Source | Query and scene behavior |
 | --- | --- |
-| CelesTrak | GP queries with explicit `FORMAT=tle`; sgp4 propagates elements to the requested datetime. `iss` uses `stations`, debris uses `cosmos-2251-debris`, rocket bodies use `NAME=R/B`. Satellites try `active`, `starlink`, then `last-30-days`. |
+| CelesTrak | GP queries with explicit `FORMAT=tle`; sgp4 propagates elements to the requested datetime. `iss` uses `stations`; debris can select Cosmos 2251, Iridium 33, Fengyun 1C, or their deduplicated union. Rocket bodies use and visibly disclose `NAME=R/B`: SATCAT has object types, but the GP endpoint has no object-type query. Satellites try `active`, `starlink`, then `last-30-days`. |
 | JPL CAD | Near-Earth approaches from the requested date through 30 days later. Approach distance is real; displayed direction is a deterministic placeholder. |
 | SIMBAD | TAP/ADQL queries by object type. Positions use catalog RA/Dec; deep-space distance is represented by an outer display band. |
 | Local ephemeris | Approximate Sun, Moon, and planet coordinates from `app/ephemeris.py`; no external request per scene. |
@@ -67,10 +67,10 @@ defines the class registry; `get_data` in
 
 | Layer | Key | Reuse and storage |
 | --- | --- | --- |
-| Scene | Raw datetime, limit, RA, Dec, radius | 45 seconds (30 for failures); process-local dictionary, maximum 64 entries; expiry pruning and oldest-entry eviction on insertion. |
+| Scene | Raw datetime, limit, RA, Dec, radius, debris field | 45 seconds (30 for failures); process-local dictionary, maximum 64 entries; expiry pruning and oldest-entry eviction on insertion. |
 | SIMBAD catalog | Source, kind, cap | 6 hours on success, 30 seconds on failure; shared 256-entry process-local catalog cache. |
 | JPL catalog | Source, requested date, cap | 1 hour on success, 30 seconds on failure; same catalog cache. |
-| TLE | Object slug | Disk text under `COSMIC_TLE_CACHE_DIR` (default `data/tle_cache`); refresh after 2 hours; 30-second failed-refresh retry; 24-hour maximum download age. |
+| TLE | Object slug | Disk text and query metadata under `COSMIC_TLE_CACHE_DIR` (default `data/tle_cache`); refresh after 2 hours; 30-second failed-refresh retry; 24-hour maximum download age. |
 
 Catalog entries are bounded and expired entries pruned on access. Per-key locks
 share concurrent misses; dictionary locks protect mutations without holding a
@@ -89,10 +89,11 @@ Scene fetch exceptions pass through `_source_unavailable`, which logs details,
 updates `metrics.source_failures`, and returns an empty result with source
 metadata. The UI displays a “Map incomplete” notice naming affected kinds and
 sources. Warnings survive cached responses and clear on a healthy response.
-Raw errors stay in admin reporting. A successful CelesTrak fallback to a smaller
-catalog still lacks a coverage
-notice; stale-download status is shown separately. See
-[`known-issues.md`](known-issues.md).
+Raw errors stay in admin reporting. Every failed CelesTrak candidate is recorded
+even if a later fallback succeeds. The selected satellite query, fallback flag,
+and failed attempts are persisted with the TLE and returned in
+`satellite_coverage`; the map labels every result as a CelesTrak subset and
+names fallback coverage. Stale-download status is shown separately.
 
 ## Classification and forecasting
 
@@ -178,6 +179,9 @@ The browser runtime is a canvas SPA in [`app.js`](../front_end/static/app.js),
 with [`auth.js`](../front_end/static/auth.js) supplying account interactions.
 It handles scene loading, a source-availability notice, pan/zoom, kind filters,
 position search, simulation, themes, image/CSV uploads, and custom objects.
+The map legend, forecast controls, and object-detail groups use native
+collapsible disclosures. Primary scene-loading and object-detail content starts
+expanded; secondary controls start collapsed.
 Sun/Moon artwork and body lighting are synchronized with scene geometry. Theme
 motifs are decorative; opt-in near-pass flashes use projected proximity, not
 conjunction analysis. Browser runtime code has no package dependencies;

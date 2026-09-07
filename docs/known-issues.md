@@ -16,22 +16,7 @@ inspection, not a security audit or load test.
 | P2 — Planned | Schedule after P1 work. |
 | P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
-Start with DATA-01 and MODEL-01.
-
-## Data sources
-
-- **DATA-01 · T2 · P1 — Satellite fallback silently reduces coverage.**
-  Queries try `active`, `starlink`, then `last-30-days`; a fallback can show
-  only a subset. Even `active` is not the entire satellite catalog. Failed
-  candidates are swallowed inside the fetcher, so a later success also hides
-  them from the admin failure log. Return the selected query and fallback
-  status, record failed attempts, and label coverage in the UI.
-- **DATA-02 · T2 · P2 — Rocket-body coverage relies on names.**
-  `NAME=R/B` misses objects without that name fragment. Label the selection
-  rule and investigate catalog object-type filtering for broader coverage.
-- **DATA-03 · T2 · P2 — Debris represents one collision field.**
-  `space_debris` maps to `cosmos-2251-debris`. Label the field in the UI;
-  additional fields need explicit selection and deduplication.
+Start with MODEL-01.
 
 ## Positions, dates, and search
 

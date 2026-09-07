@@ -108,6 +108,12 @@ const KIND_LINKS = {
   ufo:               "https://science.nasa.gov/uap/",
 };
 
+const DEBRIS_FIELD_NAMES = {
+  "cosmos-2251": "Cosmos 2251",
+  "iridium-33": "Iridium 33",
+  "fengyun-1c": "Fengyun 1C",
+};
+
 // Decorative orbital guide rings (visual only, not tied to real orbits)
 const orbits = [
   { radius: 0.14, tilt:  0.2  },
@@ -299,11 +305,16 @@ async function loadScene(datetimeISO, search) {
   updateLegendLoading(true);
   let ok = false;
   let matched = null;
+  let debrisCoverage = null;
+  let satelliteCoverage = null;
+  let rocketBodyCoverage = null;
   let invalid = false;
   let error = null;
   try {
     const params = new URLSearchParams();
     if (datetimeISO) params.set("datetime_str", datetimeISO);
+    const debrisField = document.getElementById("debris-field");
+    if (debrisField) params.set("debris_field", debrisField.value);
     // Both coordinates or neither — the API rejects half a position search.
     if (search && search.ra && search.dec) {
       params.set("ra", search.ra);
@@ -322,10 +333,32 @@ async function loadScene(datetimeISO, search) {
     const timestamp = document.getElementById("scene-timestamp");
     if (timestamp) timestamp.textContent = data.datetime
       ? "Scene time: " + new Date(data.datetime).toISOString() : "";
+    satelliteCoverage = data.satellite_coverage || null;
+    const coverage = document.getElementById("satellite-coverage");
+    if (coverage) {
+      if (!satelliteCoverage) {
+        coverage.textContent = "";
+      } else {
+        const failed = satelliteCoverage.failed_attempts || [];
+        coverage.textContent = (satelliteCoverage.fallback ? "Fallback" : "Satellite") +
+          " coverage: " + satelliteCoverage.selected_label +
+          " (CelesTrak subset)" +
+          (failed.length ? "; unavailable: " + failed.map(row => row.query).join(", ") : "") + ".";
+      }
+    }
+    rocketBodyCoverage = data.rocket_body_coverage || null;
+    const rocketCoverage = document.getElementById("rocket-body-coverage");
+    if (rocketCoverage) {
+      rocketCoverage.textContent = rocketBodyCoverage
+        ? "Rocket-body coverage: " + rocketBodyCoverage.selected_label +
+          " (CelesTrak name selection)."
+        : "";
+    }
     const warning = document.getElementById("source-warning");
     if (warning) {
       const missing = (data.source_warnings || []).map(item =>
-        (KIND_NAMES[item.kind] || item.kind) + " (" + item.source + ")"
+        (item.detail || (KIND_NAMES[item.kind] || item.kind)) +
+        " (" + item.source + ")"
       );
       const stale = (data.source_freshness || []).filter(item => item.stale);
       const oldElements = (data.source_freshness || []).filter(item =>
@@ -344,6 +377,7 @@ async function loadScene(datetimeISO, search) {
       warning.textContent = messages.join(" ");
     }
     matched = data.search || null;
+    debrisCoverage = data.debris_coverage || null;
     await mergeCustomObjects(); // the user's own saved objects
     syncLocalBodies(); // point the Sun/Moon artwork at their real positions
     ok = true;
@@ -363,7 +397,10 @@ async function loadScene(datetimeISO, search) {
   // Frame a successful search; a plain load goes back to the whole sky.
   if (ok && matched) focusOnObjects(sceneObjects);
   else if (ok) resetView();
-  return { ok, count: sceneObjects.length, search: matched, invalid, error };
+  return {
+    ok, count: sceneObjects.length, search: matched,
+    debrisCoverage, satelliteCoverage, rocketBodyCoverage, invalid, error,
+  };
 }
 
 // FastAPI puts the reason in `detail`; fall back to the status if the body
@@ -1613,7 +1650,10 @@ function showObjectInfo(idx) {
   document.getElementById("obj-y").textContent      = (yn >= 0 ? "+" : "") + yn.toFixed(4) + " u";
   document.getElementById("obj-dist").textContent   = dist.toFixed(4) + " u";
   document.getElementById("obj-az").textContent     = az + "°";
-  document.getElementById("obj-orbit").textContent  = obj.source || "—";
+  document.getElementById("obj-orbit").textContent = obj.debris_field
+    ? (obj.source || "celestrak") + " · " +
+      (DEBRIS_FIELD_NAMES[obj.debris_field] || obj.debris_field)
+    : (obj.source || "—");
   document.getElementById("obj-radius").textContent = obj.speed_kms
     ? obj.speed_kms.toFixed(2) + " km/s" : "—";
   document.getElementById("obj-kind").textContent   = KIND_NAMES[obj.kind] || obj.kind;
@@ -1800,11 +1840,29 @@ function sceneResultHTML(ra, dec, utcMinutes, result) {
   const tally = search
     ? '<p>' + search.matched + ' of ' + search.searched + ' objects in this patch of sky</p>'
     : '<p>' + result.count + ' object' + (result.count === 1 ? '' : 's') + ' loaded</p>';
+  const debris = result.debrisCoverage
+    ? '<p>Debris coverage: ' + esc(result.debrisCoverage.label) +
+      (result.debrisCoverage.duplicates_removed
+        ? ' (' + result.debrisCoverage.duplicates_removed + ' duplicate' +
+          (result.debrisCoverage.duplicates_removed === 1 ? '' : 's') + ' removed)'
+        : '') + '</p>'
+    : '';
+  const satellite = result.satelliteCoverage
+    ? '<p>Satellite coverage: ' + esc(result.satelliteCoverage.selected_label) +
+      ' (CelesTrak subset' + (result.satelliteCoverage.fallback ? ', fallback' : '') + ')</p>'
+    : '';
+  const rocketBody = result.rocketBodyCoverage
+    ? '<p>Rocket-body coverage: ' + esc(result.rocketBodyCoverage.selected_label) +
+      ' (CelesTrak name selection)</p>'
+    : '';
   return '<div class="results">' +
       '<h3>' + (search ? 'Position Search' : 'Loaded Scene') + '</h3>' +
       coords +
       '<p>Time: ' + esc(utcMinutes) + ' UTC</p>' +
       tally +
+      satellite +
+      rocketBody +
+      debris +
       '<p style="margin-top:0.5rem;color:#7a9acc;font-size:0.82rem;">' +
         'Scene paused. Press &#9654; Play to simulate forward.' +
       '</p>' +

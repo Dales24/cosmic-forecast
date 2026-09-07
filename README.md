@@ -38,7 +38,7 @@ front_end/
 |---------------|---------------------|----------|
 | Satellite     | CelesTrak (TLE)     | `/api/objects/satellite` |
 | ISS           | CelesTrak (TLE)     | `/api/objects/iss` |
-| Space debris  | CelesTrak (TLE)     | `/api/objects/space_debris` |
+| Space debris  | CelesTrak debris fields (TLE) | `/api/objects/space_debris` |
 | Rocket body   | CelesTrak (TLE)     | `/api/objects/rocket_body` |
 | Asteroid      | NASA JPL SBDB       | `/api/objects/asteroid` |
 | Comet         | NASA JPL SBDB       | `/api/objects/comet` |
@@ -90,6 +90,7 @@ front_end/
 | `limit` | `COSMIC_CAP_SATELLITE` | Override the satellite cap only |
 | `ra`, `dec` | — | Degrees. Give **both** to narrow the scene to a patch of sky; accepts `83.82` or `83.82°` |
 | `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
+| `debris_field` | `all` | `all`, `cosmos-2251`, `iridium-33`, or `fengyun-1c`; `all` deduplicates NORAD IDs |
 
 A position search adds a `search` block to the response (`matched`, `searched`,
 `radius_deg`). Objects without real sky positions, including JPL near-Earth
@@ -114,13 +115,17 @@ objects, are excluded; see [docs/known-issues.md](docs/known-issues.md).
 Three layers, each keyed on what actually changes — see
 [docs/known-issues.md](docs/known-issues.md) for the freshness implications:
 
-- **Scene** (45s, max 64 entries) — whole assembled scenes by datetime/limit/search.
+- **Scene** (45s, max 64 entries) — whole assembled scenes by
+  datetime/limit/search/debris field.
 - **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
   scene datetime, so a new minute doesn't refetch static sky.
-- **TLE disk cache** (2h) — raw CelesTrak text, matching its publish cadence.
+- **TLE disk cache** (2h) — CelesTrak text plus selected-query and fallback
+  metadata, matching its publish cadence.
 
 External-source failures never break a scene; they are logged and surfaced at
-`/api/admin/health`.
+`/api/admin/health`. The map labels the selected satellite query and identifies
+fallback results as CelesTrak subsets. Rocket bodies are explicitly labelled as
+the CelesTrak `NAME=R/B` selection because the GP API has no object-type filter.
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 
