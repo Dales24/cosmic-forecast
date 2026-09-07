@@ -62,9 +62,12 @@
       <!-- Default: forecast form -->
       <div id="form-view">
         <h1>Cosmic Forecast</h1>
-        <p class="subtitle">Enter sky coordinates and a date/time to load live objects, then click Play to simulate.</p>
+        <details class="panel-section" open>
+          <summary>Load a Scene</summary>
+          <div class="panel-section-content">
+            <p class="subtitle">Enter sky coordinates and a date/time to load live objects, then click Play to simulate.</p>
 
-        <form id="scene-form">
+            <form id="scene-form">
           <div class="coord-row">
             <div>
               <label for="ra">Right Ascension</label>
@@ -92,14 +95,15 @@
             <input type="submit" value="Load Scene">
             <button type="button" id="clear-search" class="secondary-btn">Clear</button>
           </div>
-        </form>
+            </form>
 
-        <div id="scene-result"></div>
+            <div id="scene-result"></div>
+          </div>
+        </details>
 
-        <div class="section-divider"></div>
-
-        <div class="add-object">
-          <h3 class="upload-title">Add Object to Scene</h3>
+        <details class="panel-section">
+          <summary>Add Object to Scene</summary>
+          <div class="panel-section-content add-object">
           <form id="add-object-form">
             <label for="add-name">Name</label>
             <input id="add-name" type="text" placeholder="e.g. My Probe" required>
@@ -118,12 +122,12 @@
             <input type="submit" value="✦ Add Object">
           </form>
           <p class="add-object-note" id="add-object-note"></p>
-        </div>
+          </div>
+        </details>
 
-        <div class="section-divider"></div>
-
-        <div class="upload-classifier">
-          <h3 class="upload-title">Classify Image Patch</h3>
+        <details class="panel-section">
+          <summary>Classify Image Patch</summary>
+          <div class="panel-section-content upload-classifier">
           <div class="upload-zone" id="upload-zone">
             <span class="upload-icon">🔭</span>
             <span>Drop an image or <label for="img-upload" class="upload-link">browse</label></span>
@@ -145,12 +149,12 @@
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        </details>
 
-        <div class="section-divider"></div>
-
-        <div class="upload-classifier">
-          <h3 class="upload-title">Upload Position CSV</h3>
+        <details class="panel-section">
+          <summary>Upload Position CSV</summary>
+          <div class="panel-section-content upload-classifier">
           <p class="upload-csv-hint">
             Columns: <code>id, name, kind, x, y, timestamp</code> &mdash;
             2+ rows per object. x/y are normalised orbital units (1.0&nbsp;=&nbsp;GEO).
@@ -162,7 +166,8 @@
             <input id="csv-upload" type="file" accept=".csv,text/csv" hidden>
           </div>
           <div id="csv-result" class="csv-status" style="display:none"></div>
-        </div>
+          </div>
+        </details>
 
       </div>
 
@@ -173,8 +178,8 @@
           <button class="back-btn" onclick="hideObjectInfo()">&#8592; Back</button>
         </div>
 
-        <div class="obj-section">
-          <div class="obj-section-title">Classification</div>
+        <details class="obj-section" open>
+          <summary class="obj-section-title">Classification</summary>
           <div class="obj-row">
             <span class="key">Class</span>
             <span class="val" id="obj-class">&#8212;</span>
@@ -187,10 +192,10 @@
           <div class="conf-bar-wrap">
             <div class="conf-bar" id="conf-bar" style="width:0%"></div>
           </div>
-        </div>
+        </details>
 
-        <div class="obj-section">
-          <div class="obj-section-title">Coordinates</div>
+        <details class="obj-section" open>
+          <summary class="obj-section-title">Coordinates</summary>
           <div class="obj-row">
             <span class="key">X offset</span>
             <span class="val" id="obj-x">&#8212;</span>
@@ -207,10 +212,10 @@
             <span class="key">Azimuth</span>
             <span class="val" id="obj-az">&#8212;</span>
           </div>
-        </div>
+        </details>
 
-        <div class="obj-section">
-          <div class="obj-section-title">Details</div>
+        <details class="obj-section" open>
+          <summary class="obj-section-title">Details</summary>
           <div class="obj-row">
             <span class="key">Source</span>
             <span class="val" id="obj-orbit">&#8212;</span>
@@ -223,14 +228,14 @@
             <span class="key">Type</span>
             <span class="val" id="obj-kind">&#8212;</span>
           </div>
-        </div>
+        </details>
 
-        <div class="obj-section" id="obj-about">
-          <div class="obj-section-title">About</div>
+        <details class="obj-section" id="obj-about" open>
+          <summary class="obj-section-title">About</summary>
           <p class="obj-desc" id="obj-desc"></p>
           <!-- Placeholder link — point at a real per-object info source later. -->
           <a class="obj-info-link" id="obj-info-link" href="#" rel="noopener">Further info &rarr;</a>
-        </div>
+        </details>
 
         <p class="hint">Press <strong>&#9654; Play Simulation</strong> to fast-forward paths and see ML-predicted trajectories.</p>
       </div>

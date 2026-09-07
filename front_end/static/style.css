@@ -336,6 +336,35 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
+.panel-section {
+  border-top: 1px solid rgba(var(--accent-rgb), 0.15);
+  padding: 0.9rem 0;
+}
+
+.panel-section:first-of-type { border-top: 0; padding-top: 0.35rem; }
+
+.panel-section > summary {
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-section > summary::marker,
+.obj-section-title::marker { color: var(--accent2); }
+
+.panel-section > summary:focus-visible,
+.obj-section-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+.panel-section[open] > summary { margin-bottom: 1rem; }
+
 label {
   display: block;
   font-size: 0.8rem;
@@ -479,7 +508,11 @@ input[type="submit"]:hover { filter: brightness(1.08); }
   margin-bottom: 0.5rem;
   padding-bottom: 0.3rem;
   border-bottom: 1px solid rgba(var(--accent-rgb), 0.15);
+  cursor: pointer;
+  user-select: none;
 }
+
+.obj-section:not([open]) .obj-section-title { margin-bottom: 0; }
 
 .obj-row {
   display: flex;
