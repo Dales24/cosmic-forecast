@@ -46,7 +46,7 @@ The frontend merges the signed-in user's custom objects after loading the scene.
 
 | Source | Query and scene behavior |
 | --- | --- |
-| CelesTrak | GP queries with explicit `FORMAT=tle`; sgp4 propagates elements to the requested datetime. `iss` uses `stations`, debris uses `cosmos-2251-debris`, rocket bodies use `NAME=R/B`. Satellites try `active`, `starlink`, then `last-30-days`. |
+| CelesTrak | GP queries with explicit `FORMAT=tle`; sgp4 propagates elements to the requested datetime. `iss` uses `stations`; debris can select Cosmos 2251, Iridium 33, Fengyun 1C, or their deduplicated union; rocket bodies use `NAME=R/B`. Satellites try `active`, `starlink`, then `last-30-days`. |
 | JPL CAD | Near-Earth approaches from the requested date through 30 days later. Approach distance is real; displayed direction is a deterministic placeholder. |
 | SIMBAD | TAP/ADQL queries by object type. Positions use catalog RA/Dec; deep-space distance is represented by an outer display band. |
 | Local ephemeris | Approximate Sun, Moon, and planet coordinates from `app/ephemeris.py`; no external request per scene. |

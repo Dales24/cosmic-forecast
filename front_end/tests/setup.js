@@ -33,6 +33,12 @@ document.body.innerHTML = `
     <input id="ra"           type="text">
     <input id="dec"          type="text">
     <input id="obs_datetime" type="datetime-local">
+    <select id="debris-field">
+      <option value="all">All supported fields</option>
+      <option value="cosmos-2251">Cosmos 2251 debris</option>
+      <option value="iridium-33">Iridium 33 debris</option>
+      <option value="fengyun-1c">Fengyun 1C debris</option>
+    </select>
     <input type="submit">
     <button type="button" id="clear-search">Clear</button>
   </form>

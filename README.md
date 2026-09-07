@@ -38,7 +38,7 @@ front_end/
 |---------------|---------------------|----------|
 | Satellite     | CelesTrak (TLE)     | `/api/objects/satellite` |
 | ISS           | CelesTrak (TLE)     | `/api/objects/iss` |
-| Space debris  | CelesTrak (TLE)     | `/api/objects/space_debris` |
+| Space debris  | CelesTrak debris fields (TLE) | `/api/objects/space_debris` |
 | Rocket body   | CelesTrak (TLE)     | `/api/objects/rocket_body` |
 | Asteroid      | NASA JPL SBDB       | `/api/objects/asteroid` |
 | Comet         | NASA JPL SBDB       | `/api/objects/comet` |
@@ -90,6 +90,7 @@ front_end/
 | `limit` | `COSMIC_CAP_SATELLITE` | Override the satellite cap only |
 | `ra`, `dec` | — | Degrees. Give **both** to narrow the scene to a patch of sky; accepts `83.82` or `83.82°` |
 | `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
+| `debris_field` | `all` | `all`, `cosmos-2251`, `iridium-33`, or `fengyun-1c`; `all` deduplicates NORAD IDs |
 
 A position search adds a `search` block to the response (`matched`, `searched`,
 `radius_deg`). Objects without real sky positions, including JPL near-Earth

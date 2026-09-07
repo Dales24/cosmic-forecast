@@ -104,9 +104,18 @@ def _validate_tle(text):
 
 # ── CelesTrak ─────────────────────────────────────────────────────────────────
 # CelesTrak retired the legacy /pub/TLE/*.txt files (now HTTP 403); use the GP
-# query API. There is no generic "debris" or "rocket-bodies" group, so debris is
-# sourced from a representative field (Cosmos 2251 collision fragments).
+# query API. CelesTrak exposes major debris events as separate groups.
 _CELESTRAK_GP = "https://celestrak.org/NORAD/elements/gp.php"
+DEBRIS_FIELDS = {
+    "all": {
+        "label": "All supported debris fields",
+        "groups": ("cosmos-2251", "iridium-33", "fengyun-1c"),
+    },
+    "cosmos-2251": {"label": "Cosmos 2251 debris", "groups": ("cosmos-2251",)},
+    "iridium-33": {"label": "Iridium 33 debris", "groups": ("iridium-33",)},
+    "fengyun-1c": {"label": "Fengyun 1C debris", "groups": ("fengyun-1c",)},
+}
+DEFAULT_DEBRIS_FIELD = "all"
 # Each slug maps to an ordered list of candidate queries; the first that returns
 # data wins. "active" is the canonical all-satellites catalog but is CelesTrak's
 # most heavily throttled group (403 within its 2h update window), so it falls
@@ -119,11 +128,23 @@ _CELESTRAK_URLS: dict[str, list[str]] = {
         f"{_CELESTRAK_GP}?GROUP=last-30-days&FORMAT=tle",
     ],
     "iss": [f"{_CELESTRAK_GP}?GROUP=stations&FORMAT=tle"],
+    # Keep the public object endpoint backward-compatible while scene requests
+    # use the field-specific cache keys below.
     "space_debris": [f"{_CELESTRAK_GP}?GROUP=cosmos-2251-debris&FORMAT=tle"],
+    "space_debris_cosmos_2251": [
+        f"{_CELESTRAK_GP}?GROUP=cosmos-2251-debris&FORMAT=tle"
+    ],
+    "space_debris_iridium_33": [f"{_CELESTRAK_GP}?GROUP=iridium-33-debris&FORMAT=tle"],
+    "space_debris_fengyun_1c": [f"{_CELESTRAK_GP}?GROUP=fengyun-1c-debris&FORMAT=tle"],
     # CelesTrak has no GP group for rocket bodies. They are catalogued with the
     # "R/B" suffix in the object name, so query by NAME instead of GROUP.
     "rocket_body": [f"{_CELESTRAK_GP}?NAME=R/B&FORMAT=tle"],
 }
+
+
+def debris_cache_slug(group: str) -> str:
+    """Return the safe, field-specific cache slug for a CelesTrak group."""
+    return "space_debris_" + group.replace("-", "_")
 
 
 def _parse_tle_text(text: str, limit: int) -> list[dict]:

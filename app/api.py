@@ -255,6 +255,7 @@ class CappedObjects(NamedTuple):
     hidden_exact: bool  # False when `hidden` is a "there are more" floor
     unavailable_source: str | None = None
     freshness: dict | None = None
+    metadata: dict | None = None
 
 
 def _probe_cap(cap: int) -> int:
@@ -374,6 +375,71 @@ def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects
         max(0, available - cap),
         True,
         freshness=getattr(tle_text, "freshness", None),
+    )
+
+
+def _merged_freshness(rows: list[dict]) -> dict | None:
+    if not rows:
+        return None
+    return {
+        "downloaded_at": min(row["downloaded_at"] for row in rows),
+        "oldest_epoch": min(row["oldest_epoch"] for row in rows),
+        "stale": any(row["stale"] for row in rows),
+        "valid_until": min(row["valid_until"] for row in rows),
+    }
+
+
+def _debris_scene_objects(dt: datetime, cap: int, field: str) -> CappedObjects:
+    """Fetch selected debris fields and deduplicate them by NORAD catalog ID."""
+    from app.data_parser import DEBRIS_FIELDS, debris_cache_slug, fetch_celestrak_text
+
+    selected = DEBRIS_FIELDS[field]
+    metadata = {
+        "value": field,
+        "label": selected["label"],
+        "groups": list(selected["groups"]),
+        "loaded_groups": [],
+        "unavailable_groups": [],
+        "duplicates_removed": 0,
+    }
+    if cap <= 0:
+        return CappedObjects([], 0, True, metadata=metadata)
+
+    unique: dict[str, tuple[str, str, str, str]] = {}
+    freshness = []
+    for group in selected["groups"]:
+        try:
+            text = fetch_celestrak_text(debris_cache_slug(group))
+        except Exception as exc:
+            _source_unavailable("celestrak", f"space_debris:{group}", exc)
+            metadata["unavailable_groups"].append(group)
+            continue
+        metadata["loaded_groups"].append(group)
+        if getattr(text, "freshness", None):
+            freshness.append(text.freshness)
+        for name, first, second in _iter_tle_sets(text):
+            catalog_id = first[2:7].strip()
+            if catalog_id in unique:
+                metadata["duplicates_removed"] += 1
+            else:
+                unique[catalog_id] = (name, first, second, group)
+
+    if not metadata["loaded_groups"]:
+        return CappedObjects([], 0, True, "celestrak", metadata=metadata)
+
+    tle_text = "\n".join(
+        "\n".join((name, first, second)) for name, first, second, _ in unique.values()
+    )
+    objects = _propagate_tles(tle_text, dt, limit=cap, kind="space_debris")
+    object_groups = {catalog_id: row[3] for catalog_id, row in unique.items()}
+    for obj in objects:
+        obj["debris_field"] = object_groups[obj["id"]]
+    return CappedObjects(
+        objects,
+        max(0, len(unique) - cap),
+        True,
+        freshness=_merged_freshness(freshness),
+        metadata=metadata,
     )
 
 
@@ -638,7 +704,7 @@ def _cache_scene(cache_key: tuple, result: dict) -> None:
 
 
 def _capped_scene_objects(
-    dt: datetime, satellite_cap: int
+    dt: datetime, satellite_cap: int, debris_field: str
 ) -> tuple[list[dict], list[dict]]:
     """Fetch every capped catalog for `dt`, concurrently.
 
@@ -653,7 +719,11 @@ def _capped_scene_objects(
     fetchers: dict[str, partial] = {
         kind: partial(_celestrak_scene_objects, kind, dt, caps[kind])
         for kind in _TLE_SCENE_KINDS
+        if kind != "space_debris"
     }
+    fetchers["space_debris"] = partial(
+        _debris_scene_objects, dt, caps["space_debris"], debris_field
+    )
     fetchers["near_earth_object"] = partial(
         _jpl_scene_objects, date_str, caps["near_earth_object"]
     )
@@ -685,6 +755,8 @@ def _capped_scene_objects(
             cap_rows[-1]["unavailable_source"] = result.unavailable_source
         if result.freshness:
             cap_rows[-1]["freshness"] = result.freshness
+        if result.metadata:
+            cap_rows[-1]["metadata"] = result.metadata
     return objects, cap_rows
 
 
@@ -692,7 +764,14 @@ def _record_scene_caps(cap_rows: list[dict]) -> None:
     """Publish the cap outcome to the admin monitor, and log the headline."""
     from app.metrics import scene_cap_report
 
-    scene_cap_report.record(cap_rows)
+    # Coverage metadata belongs in the scene response, while admin cap metrics
+    # retain their stable per-kind shape.
+    scene_cap_report.record(
+        [
+            {key: value for key, value in row.items() if key != "metadata"}
+            for row in cap_rows
+        ]
+    )
     hidden = sum(row["hidden"] for row in cap_rows)
     if hidden:
         detail = ", ".join(
@@ -787,19 +866,24 @@ def get_scene(
     ra: str | None = None,
     dec: str | None = None,
     radius_deg: float = _DEFAULT_SEARCH_RADIUS_DEG,
+    debris_field: str = "all",
 ):
     """The scene for a moment, optionally narrowed to a patch of sky.
 
     `ra`/`dec` are degrees; give both to search. `radius_deg` is the cone's
     half-angle around them.
     """
-    cache_key = (datetime_str, limit, ra, dec, radius_deg)
+    from app.data_parser import DEBRIS_FIELDS
+
+    if debris_field not in DEBRIS_FIELDS:
+        raise HTTPException(422, "unknown debris_field")
+    cache_key = (datetime_str, limit, ra, dec, radius_deg, debris_field)
     with _scene_keys.hold(cache_key):
-        return _build_scene(datetime_str, limit, ra, dec, radius_deg)
+        return _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field)
 
 
-def _build_scene(datetime_str, limit, ra, dec, radius_deg):
-    cache_key = (datetime_str, limit, ra, dec, radius_deg)
+def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
+    cache_key = (datetime_str, limit, ra, dec, radius_deg, debris_field)
     cached = _cached_scene(cache_key)
     if cached is not None:
         return cached
@@ -814,7 +898,7 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg):
     dt = _parse_scene_datetime(datetime_str)
 
     satellite_cap = limit if limit is not None else config.scene_cap("satellite")
-    objects, cap_rows = _capped_scene_objects(dt, satellite_cap)
+    objects, cap_rows = _capped_scene_objects(dt, satellite_cap, debris_field)
     _record_scene_caps(cap_rows)
 
     # Solar-system bodies at their real positions — local, no network.
@@ -832,6 +916,19 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg):
             if row.get("unavailable_source")
         ],
     }
+    debris_row = next((row for row in cap_rows if row["kind"] == "space_debris"), None)
+    if debris_row and debris_row.get("metadata"):
+        result["debris_coverage"] = debris_row["metadata"]
+        unavailable_groups = debris_row["metadata"]["unavailable_groups"]
+        if unavailable_groups and debris_row["metadata"]["loaded_groups"]:
+            result["source_warnings"].append(
+                {
+                    "source": "celestrak",
+                    "kind": "space_debris",
+                    "detail": "Unavailable debris fields: "
+                    + ", ".join(unavailable_groups),
+                }
+            )
     result["source_freshness"] = [
         {"source": "celestrak", "kind": row["kind"], **row["freshness"]}
         for row in cap_rows

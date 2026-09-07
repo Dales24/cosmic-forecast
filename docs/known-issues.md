@@ -29,10 +29,6 @@ Start with DATA-01 and MODEL-01.
 - **DATA-02 · T2 · P2 — Rocket-body coverage relies on names.**
   `NAME=R/B` misses objects without that name fragment. Label the selection
   rule and investigate catalog object-type filtering for broader coverage.
-- **DATA-03 · T2 · P2 — Debris represents one collision field.**
-  `space_debris` maps to `cosmos-2251-debris`. Label the field in the UI;
-  additional fields need explicit selection and deduplication.
-
 ## Positions, dates, and search
 
 - **POS-01 · T1 · P2 — Near-Earth object directions are placeholders.**

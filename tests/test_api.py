@@ -526,6 +526,68 @@ def test_scene_includes_all_orbital_categories():
         assert kind in kinds, f"missing {kind}"
 
 
+def test_scene_selects_one_debris_field_and_reports_it():
+    fetched = []
+
+    def fake_tle(slug):
+        fetched.append(slug)
+        return _ISS_TLE
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=fake_tle),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?debris_field=iridium-33")
+
+    assert r.status_code == 200
+    assert "space_debris_iridium_33" in fetched
+    assert "space_debris_cosmos_2251" not in fetched
+    coverage = r.json()["debris_coverage"]
+    assert coverage["label"] == "Iridium 33 debris"
+    debris = [o for o in r.json()["objects"] if o["kind"] == "space_debris"]
+    assert debris and debris[0]["debris_field"] == "iridium-33"
+
+
+def test_scene_all_debris_fields_deduplicate_catalog_ids():
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=_ISS_TLE),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?debris_field=all")
+
+    debris = [o for o in r.json()["objects"] if o["kind"] == "space_debris"]
+    assert len(debris) == 1
+    assert r.json()["debris_coverage"]["duplicates_removed"] == 2
+
+
+def test_scene_reports_a_partially_unavailable_debris_union():
+    def fake_tle(slug):
+        if slug == "space_debris_iridium_33":
+            raise OSError("offline")
+        return _ISS_TLE
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=fake_tle),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?debris_field=all")
+
+    assert r.status_code == 200
+    assert r.json()["debris_coverage"]["unavailable_groups"] == ["iridium-33"]
+    warning = next(
+        row for row in r.json()["source_warnings"] if row["kind"] == "space_debris"
+    )
+    assert "iridium-33" in warning["detail"]
+
+
+def test_scene_rejects_unknown_debris_field():
+    r = client.get("/api/scene?debris_field=not-a-field")
+    assert r.status_code == 422
+
+
 def test_scene_is_cached_within_ttl():
     """A repeat scene load is served from cache and doesn't refetch catalogs."""
     calls = {"jpl": 0}

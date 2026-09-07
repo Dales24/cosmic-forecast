@@ -21,6 +21,15 @@ describe('sceneResultHTML()', () => {
     expect(html).toContain('1 object loaded'); // singular
   });
 
+  test('labels selected debris coverage and deduplication', () => {
+    const html = app.sceneResultHTML('', '', '2026-12-25 00:00', {
+      ok: true, count: 2,
+      debrisCoverage: { label: 'All supported debris fields', duplicates_removed: 3 },
+    });
+    expect(html).toContain('Debris coverage: All supported debris fields');
+    expect(html).toContain('3 duplicates removed');
+  });
+
   test('includes coordinates when both are given', () => {
     const html = app.sceneResultHTML('83.82', '-5.39', '2026-12-25 00:00', { ok: true, count: 2 });
     expect(html).toContain('83.82');
@@ -79,6 +88,21 @@ describe('loadScene()', () => {
     expect(notice.hidden).toBe(true);
     expect(notice.textContent).toBe('');
   });
+
+  test('shows the specific debris field when combined coverage is partial', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], source_warnings: [{
+        source: 'celestrak', kind: 'space_debris',
+        detail: 'Unavailable debris fields: iridium-33',
+      }] }),
+    });
+
+    await app.loadScene('2026-12-25T00:00:00Z');
+
+    expect(document.getElementById('source-warning').textContent)
+      .toContain('Unavailable debris fields: iridium-33');
+  });
   test('sends the chosen datetime to the API and reports the count', async () => {
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,
@@ -91,6 +115,22 @@ describe('loadScene()', () => {
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
     expect(result.search).toBeNull();
+  });
+
+  test('sends the selected debris field and returns coverage metadata', async () => {
+    document.getElementById('debris-field').value = 'iridium-33';
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        objects: [], debris_coverage: { label: 'Iridium 33 debris' },
+      }),
+    }));
+
+    const result = await app.loadScene('2026-12-25T00:00:00Z');
+
+    expect(global.fetch.mock.calls[0][0]).toContain('debris_field=iridium-33');
+    expect(result.debrisCoverage.label).toBe('Iridium 33 debris');
+    document.getElementById('debris-field').value = 'all';
   });
 
   test('reports failure on a non-OK response, keeping the previous scene', async () => {

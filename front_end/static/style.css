@@ -307,6 +307,13 @@ body {
 .theme-select:focus  { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2); }
 .theme-select option { background: #0b0f1e; color: var(--text); }
 
+.field-note {
+  margin: -0.55rem 0 1rem;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
 /* ── Panel header ────────────────────────────────────────────────────────────── */
 h1 {
   font-size: 1.5rem;

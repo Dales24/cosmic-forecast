@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.data_parser import (
+    DEBRIS_FIELDS,
     _TLE_CACHE_TTL_SECONDS,
     _parse_tle_text,
     fetch_celestrak,
@@ -106,6 +107,15 @@ def test_fetch_celestrak_uses_gp_group_url(tmp_path, slug, group):
         timeout=10,
     )
     assert result[0]["catalog_id"] == "25544"
+
+
+@pytest.mark.parametrize("field", ["cosmos-2251", "iridium-33", "fengyun-1c"])
+def test_debris_fields_have_celestrak_cache_routes(field):
+    from app.data_parser import _CELESTRAK_URLS, debris_cache_slug
+
+    slug = debris_cache_slug(field)
+    assert field in DEBRIS_FIELDS
+    assert f"GROUP={field}-debris" in _CELESTRAK_URLS[slug][0]
 
 
 def test_fetch_celestrak_parses_response(tmp_path):

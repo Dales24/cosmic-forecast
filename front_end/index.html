@@ -78,6 +78,15 @@
           <label for="obs_datetime">Observation Date &amp; Time (UTC)</label>
           <input id="obs_datetime" type="datetime-local" name="obs_datetime">
 
+          <label for="debris-field">Debris field</label>
+          <select id="debris-field" class="theme-select" name="debris_field">
+            <option value="all">All supported fields</option>
+            <option value="cosmos-2251">Cosmos 2251 debris</option>
+            <option value="iridium-33">Iridium 33 debris</option>
+            <option value="fengyun-1c">Fengyun 1C debris</option>
+          </select>
+          <p class="field-note">CelesTrak collision fields; duplicate NORAD IDs are shown once.</p>
+
           <div class="form-actions">
             <input type="submit" value="Load Scene">
             <button type="button" id="clear-search" class="secondary-btn">Clear</button>
