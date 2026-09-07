@@ -72,13 +72,16 @@ Things in the current codebase that this plan directly affects:
   Behind more than one instance each replica keeps its own, so hit rates drop
   and freshness varies between replicas. ElastiCache or accepting the drift are
   both fine, but it should be a decision, not a surprise.
-- **`_ensure_admin_user()` creates a default `admin`/`admin` login on startup**
-  and deliberately bypasses the password-length rule. This must be removed or
-  gated before any real deployment.
+- **Bootstrap admin creation requires an explicit secret.** When
+  `COSMIC_BOOTSTRAP_ADMIN` is truthy, set
+  `COSMIC_BOOTSTRAP_ADMIN_PASSWORD` to at least 12 characters. The username
+  defaults to `admin` and can be changed with
+  `COSMIC_BOOTSTRAP_ADMIN_USERNAME`. Startup creates or rotates that account;
+  provide the password through deployment secret storage, never source control.
 
-## Still-open database work (pre-deployment)
+## Database behavior
 
-- Session expiry + pruning (needs a TTL decision; 30 days is typical).
-- WAL journal mode — writers currently block readers.
-- Connection reuse; a new connection is opened per query (~37x overhead on
-  repeated reads).
+Sessions expire after 7 days and are pruned on login. File databases use WAL
+with a 5-second busy timeout. Application operations reuse one connection per
+worker thread, roll back failed operations, and replace the connection when the
+configured database path changes.

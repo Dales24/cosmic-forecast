@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from functools import partial
 from math import acos, asin, atan2, cos, degrees, log10, pi, radians, sin, sqrt
 from typing import Iterator, NamedTuple
+from threading import RLock
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
@@ -21,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, config, db
+from app.cache_lock import KeyLocks, synchronized
 
 # Add project root so `app.*` imports work when run from app/ directory
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -192,7 +194,7 @@ def _source_unavailable(source: str, kind: str, exc: Exception) -> "CappedObject
 
     log.warning("%s fetch failed for %s: %s", source, kind, exc)
     source_failures.record(source, kind, str(exc))
-    return CappedObjects([], 0, True)
+    return CappedObjects([], 0, True, source)
 
 
 # ── Catalog result cache ──────────────────────────────────────────────────────
@@ -204,23 +206,41 @@ _SIMBAD_TTL_SECONDS = 6 * 60 * 60
 _JPL_TTL_SECONDS = 60 * 60
 _catalog_cache: dict[tuple, tuple[float, "CappedObjects"]] = {}
 
+_CATALOG_CACHE_MAX_ENTRIES = 256
+_FAILURE_TTL_SECONDS = 30
+_catalog_guard = RLock()
+_catalog_keys = KeyLocks()
+_catalog_expiry: dict[tuple, float] = {}
+
 
 def _clear_catalog_cache() -> None:
-    _catalog_cache.clear()
+    with _catalog_guard:
+        _catalog_cache.clear()
+        _catalog_expiry.clear()
 
 
 def _cached_catalog(key: tuple, ttl: float, fetch) -> "CappedObjects":
-    """Memoize one catalog fetch under `key` for `ttl` seconds.
-
-    Called from the scene's thread pool; a race just means two threads fetch
-    the same catalog once, which is harmless.
-    """
-    cached = _catalog_cache.get(key)
-    if cached and (time.time() - cached[0]) < ttl:
-        return cached[1]
-    result = fetch()
-    _catalog_cache[key] = (time.time(), result)
-    return result
+    """Bounded process-local cache; share misses per key and retry failures soon."""
+    with _catalog_keys.hold(key):
+        with _catalog_guard:
+            now = time.time()
+            for expired in list(_catalog_expiry):
+                if _catalog_expiry[expired] <= now:
+                    _catalog_cache.pop(expired, None)
+                    del _catalog_expiry[expired]
+            cached = _catalog_cache.get(key)
+            if cached:
+                return cached[1]
+        result = fetch()
+        lifetime = _FAILURE_TTL_SECONDS if result.unavailable_source else ttl
+        with _catalog_guard:
+            while len(_catalog_cache) >= _CATALOG_CACHE_MAX_ENTRIES:
+                oldest = min(_catalog_cache, key=lambda k: _catalog_cache[k][0])
+                del _catalog_cache[oldest]
+                _catalog_expiry.pop(oldest, None)
+            _catalog_cache[key] = (time.time(), result)
+            _catalog_expiry[key] = time.time() + lifetime
+        return result
 
 
 # ── Capped catalog sources ────────────────────────────────────────────────────
@@ -233,6 +253,9 @@ class CappedObjects(NamedTuple):
     objects: list[dict]
     hidden: int  # objects the cap excluded; 0 when nothing was dropped
     hidden_exact: bool  # False when `hidden` is a "there are more" floor
+    unavailable_source: str | None = None
+    freshness: dict | None = None
+    metadata: dict | None = None
 
 
 def _probe_cap(cap: int) -> int:
@@ -347,7 +370,83 @@ def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects
         return _source_unavailable("celestrak", kind, exc)
     available = sum(1 for _ in _iter_tle_sets(tle_text))
     objects = _propagate_tles(tle_text, dt, limit=cap, kind=kind)
-    return CappedObjects(objects, max(0, available - cap), True)
+    return CappedObjects(
+        objects,
+        max(0, available - cap),
+        True,
+        freshness=getattr(tle_text, "freshness", None),
+        metadata=(
+            {f"{kind}_coverage": tle_text.coverage}
+            if kind in {"satellite", "rocket_body"}
+            and getattr(tle_text, "coverage", None)
+            else None
+        ),
+    )
+
+
+def _merged_freshness(rows: list[dict]) -> dict | None:
+    if not rows:
+        return None
+    return {
+        "downloaded_at": min(row["downloaded_at"] for row in rows),
+        "oldest_epoch": min(row["oldest_epoch"] for row in rows),
+        "stale": any(row["stale"] for row in rows),
+        "valid_until": min(row["valid_until"] for row in rows),
+    }
+
+
+def _debris_scene_objects(dt: datetime, cap: int, field: str) -> CappedObjects:
+    """Fetch selected debris fields and deduplicate them by NORAD catalog ID."""
+    from app.data_parser import DEBRIS_FIELDS, debris_cache_slug, fetch_celestrak_text
+
+    selected = DEBRIS_FIELDS[field]
+    metadata = {
+        "value": field,
+        "label": selected["label"],
+        "groups": list(selected["groups"]),
+        "loaded_groups": [],
+        "unavailable_groups": [],
+        "duplicates_removed": 0,
+    }
+    if cap <= 0:
+        return CappedObjects([], 0, True, metadata=metadata)
+
+    unique: dict[str, tuple[str, str, str, str]] = {}
+    freshness = []
+    for group in selected["groups"]:
+        try:
+            text = fetch_celestrak_text(debris_cache_slug(group))
+        except Exception as exc:
+            _source_unavailable("celestrak", f"space_debris:{group}", exc)
+            metadata["unavailable_groups"].append(group)
+            continue
+        metadata["loaded_groups"].append(group)
+        if getattr(text, "freshness", None):
+            freshness.append(text.freshness)
+        for name, first, second in _iter_tle_sets(text):
+            catalog_id = first[2:7].strip()
+            if catalog_id in unique:
+                metadata["duplicates_removed"] += 1
+            else:
+                unique[catalog_id] = (name, first, second, group)
+
+    if not metadata["loaded_groups"]:
+        return CappedObjects([], 0, True, "celestrak", metadata=metadata)
+
+    tle_text = "\n".join(
+        "\n".join((name, first, second)) for name, first, second, _ in unique.values()
+    )
+    objects = _propagate_tles(tle_text, dt, limit=cap, kind="space_debris")
+    object_groups = {catalog_id: row[3] for catalog_id, row in unique.items()}
+    for obj in objects:
+        obj["debris_field"] = object_groups[obj["id"]]
+    return CappedObjects(
+        objects,
+        max(0, len(unique) - cap),
+        True,
+        freshness=_merged_freshness(freshness),
+        metadata=metadata,
+    )
 
 
 def _simbad_scene_objects(kind: str, cap: int) -> CappedObjects:
@@ -565,23 +664,32 @@ _SCENE_TTL_SECONDS = 45.0
 # ~100-object entry per request and never shrink.
 _SCENE_CACHE_MAX_ENTRIES = 64
 _scene_cache: dict[tuple, tuple[float, dict]] = {}
+_scene_guard = RLock()
+_scene_keys = KeyLocks()
 
 
+@synchronized(_scene_guard)
 def _clear_scene_cache() -> None:
     _scene_cache.clear()
 
 
+@synchronized(_scene_guard)
 def _cached_scene(cache_key: tuple) -> dict | None:
     """The cached scene for `cache_key`, if one is still inside its TTL."""
     cached = _scene_cache.get(cache_key)
     if cached is None:
         return None
-    if (time.time() - cached[0]) >= _SCENE_TTL_SECONDS:
+    ttl = (
+        _FAILURE_TTL_SECONDS if cached[1].get("source_warnings") else _SCENE_TTL_SECONDS
+    )
+    valid_until = cached[1].get("valid_until", float("inf"))
+    if (time.time() - cached[0]) >= ttl or time.time() >= valid_until:
         del _scene_cache[cache_key]
         return None
     return cached[1]
 
 
+@synchronized(_scene_guard)
 def _cache_scene(cache_key: tuple, result: dict) -> None:
     """Store a scene, dropping expired entries and capping total size."""
     now = time.time()
@@ -602,7 +710,7 @@ def _cache_scene(cache_key: tuple, result: dict) -> None:
 
 
 def _capped_scene_objects(
-    dt: datetime, satellite_cap: int
+    dt: datetime, satellite_cap: int, debris_field: str
 ) -> tuple[list[dict], list[dict]]:
     """Fetch every capped catalog for `dt`, concurrently.
 
@@ -617,7 +725,11 @@ def _capped_scene_objects(
     fetchers: dict[str, partial] = {
         kind: partial(_celestrak_scene_objects, kind, dt, caps[kind])
         for kind in _TLE_SCENE_KINDS
+        if kind != "space_debris"
     }
+    fetchers["space_debris"] = partial(
+        _debris_scene_objects, dt, caps["space_debris"], debris_field
+    )
     fetchers["near_earth_object"] = partial(
         _jpl_scene_objects, date_str, caps["near_earth_object"]
     )
@@ -645,6 +757,12 @@ def _capped_scene_objects(
                 "hidden_exact": result.hidden_exact,
             }
         )
+        if result.unavailable_source:
+            cap_rows[-1]["unavailable_source"] = result.unavailable_source
+        if result.freshness:
+            cap_rows[-1]["freshness"] = result.freshness
+        if result.metadata:
+            cap_rows[-1]["metadata"] = result.metadata
     return objects, cap_rows
 
 
@@ -652,7 +770,14 @@ def _record_scene_caps(cap_rows: list[dict]) -> None:
     """Publish the cap outcome to the admin monitor, and log the headline."""
     from app.metrics import scene_cap_report
 
-    scene_cap_report.record(cap_rows)
+    # Coverage metadata belongs in the scene response, while admin cap metrics
+    # retain their stable per-kind shape.
+    scene_cap_report.record(
+        [
+            {key: value for key, value in row.items() if key != "metadata"}
+            for row in cap_rows
+        ]
+    )
     hidden = sum(row["hidden"] for row in cap_rows)
     if hidden:
         detail = ", ".join(
@@ -747,13 +872,24 @@ def get_scene(
     ra: str | None = None,
     dec: str | None = None,
     radius_deg: float = _DEFAULT_SEARCH_RADIUS_DEG,
+    debris_field: str = "all",
 ):
     """The scene for a moment, optionally narrowed to a patch of sky.
 
     `ra`/`dec` are degrees; give both to search. `radius_deg` is the cone's
     half-angle around them.
     """
-    cache_key = (datetime_str, limit, ra, dec, radius_deg)
+    from app.data_parser import DEBRIS_FIELDS
+
+    if debris_field not in DEBRIS_FIELDS:
+        raise HTTPException(422, "unknown debris_field")
+    cache_key = (datetime_str, limit, ra, dec, radius_deg, debris_field)
+    with _scene_keys.hold(cache_key):
+        return _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field)
+
+
+def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
+    cache_key = (datetime_str, limit, ra, dec, radius_deg, debris_field)
     cached = _cached_scene(cache_key)
     if cached is not None:
         return cached
@@ -768,7 +904,7 @@ def get_scene(
     dt = _parse_scene_datetime(datetime_str)
 
     satellite_cap = limit if limit is not None else config.scene_cap("satellite")
-    objects, cap_rows = _capped_scene_objects(dt, satellite_cap)
+    objects, cap_rows = _capped_scene_objects(dt, satellite_cap, debris_field)
     _record_scene_caps(cap_rows)
 
     # Solar-system bodies at their real positions — local, no network.
@@ -777,22 +913,47 @@ def get_scene(
     objects.append(_moon_scene_object(dt))
     objects.extend(_planet_scene_objects(dt))
 
-    # Unidentified — position intentionally unknown
-    objects.append(
-        {
-            "id": "UNIDENTIFIED-1",
-            "name": "Unidentified \U0001f47d",
-            "kind": "ufo",
-            "x_norm": 0.28,
-            "y_norm": -0.20,
-            "vx_norm": 0.0,
-            "vy_norm": 0.0,
-            "speed_kms": 0.0,
-            "source": "unknown",
-        }
+    result = {
+        "datetime": dt.isoformat(),
+        "objects": objects,
+        "source_warnings": [
+            {"source": row["unavailable_source"], "kind": row["kind"]}
+            for row in cap_rows
+            if row.get("unavailable_source")
+        ],
+    }
+    debris_row = next((row for row in cap_rows if row["kind"] == "space_debris"), None)
+    if debris_row and debris_row.get("metadata"):
+        result["debris_coverage"] = debris_row["metadata"]
+        unavailable_groups = debris_row["metadata"]["unavailable_groups"]
+        if unavailable_groups and debris_row["metadata"]["loaded_groups"]:
+            result["source_warnings"].append(
+                {
+                    "source": "celestrak",
+                    "kind": "space_debris",
+                    "detail": "Unavailable debris fields: "
+                    + ", ".join(unavailable_groups),
+                }
+            )
+    satellite_row = next((row for row in cap_rows if row["kind"] == "satellite"), None)
+    if satellite_row and satellite_row.get("metadata"):
+        result["satellite_coverage"] = satellite_row["metadata"]["satellite_coverage"]
+    rocket_body_row = next(
+        (row for row in cap_rows if row["kind"] == "rocket_body"), None
     )
-
-    result = {"datetime": dt.isoformat(), "objects": objects}
+    if rocket_body_row and rocket_body_row.get("metadata"):
+        result["rocket_body_coverage"] = rocket_body_row["metadata"][
+            "rocket_body_coverage"
+        ]
+    result["source_freshness"] = [
+        {"source": "celestrak", "kind": row["kind"], **row["freshness"]}
+        for row in cap_rows
+        if row.get("freshness")
+    ]
+    if result["source_freshness"]:
+        result["valid_until"] = min(
+            row["valid_until"] for row in result["source_freshness"]
+        )
     if search_ra is not None and search_dec is not None:
         total = len(objects)
         result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)
@@ -1142,16 +1303,41 @@ def api_admin_health(check_sources: bool = False, user=Depends(auth.require_admi
     return data
 
 
-def _ensure_admin_user() -> None:
-    """Dev convenience: a default admin/admin login, created if it's missing.
+_ADMIN_BOOTSTRAP_ENV = "COSMIC_BOOTSTRAP_ADMIN"
+_ADMIN_BOOTSTRAP_PASSWORD_ENV = "COSMIC_BOOTSTRAP_ADMIN_PASSWORD"
+_ADMIN_BOOTSTRAP_USERNAME_ENV = "COSMIC_BOOTSTRAP_ADMIN_USERNAME"
+_ADMIN_BOOTSTRAP_MIN_PASSWORD = 12
+_TRUTHY = {"1", "true", "yes", "on"}
 
-    Bypasses the normal password-length rule on purpose — replace with a real
-    admin before any real deployment.
-    """
-    if db.get_user_by_username("admin"):
+
+def _bootstrap_admin_enabled() -> bool:
+    return os.environ.get(_ADMIN_BOOTSTRAP_ENV, "").strip().lower() in _TRUTHY
+
+
+def _ensure_admin_user() -> None:
+    """Create or rotate an opt-in bootstrap admin using an explicit secret."""
+    if not _bootstrap_admin_enabled():
         return
-    pw_hash, salt = auth.hash_password("admin")
-    db.create_user("admin", None, pw_hash, salt, is_admin=True)
+    username = os.environ.get(_ADMIN_BOOTSTRAP_USERNAME_ENV, "admin").strip()
+    password = os.environ.get(_ADMIN_BOOTSTRAP_PASSWORD_ENV, "")
+    if not username:
+        raise RuntimeError(f"{_ADMIN_BOOTSTRAP_USERNAME_ENV} cannot be empty")
+    if len(password) < _ADMIN_BOOTSTRAP_MIN_PASSWORD:
+        raise RuntimeError(
+            f"{_ADMIN_BOOTSTRAP_PASSWORD_ENV} must be at least "
+            f"{_ADMIN_BOOTSTRAP_MIN_PASSWORD} characters when "
+            f"{_ADMIN_BOOTSTRAP_ENV} is enabled"
+        )
+    pw_hash, salt = auth.hash_password(password)
+    existing = db.get_user_by_username(username)
+    if existing:
+        if auth.verify_password(password, existing["salt"], existing["password_hash"]):
+            if not existing["is_admin"]:
+                db.set_user_admin(existing["id"], True)
+        else:
+            db.set_user_credentials(existing["id"], pw_hash, salt, is_admin=True)
+    else:
+        db.create_user(username, None, pw_hash, salt, is_admin=True)
 
 
 @app.on_event("startup")

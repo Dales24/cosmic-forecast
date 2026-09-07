@@ -89,9 +89,15 @@ def get_model(key: str) -> PublishableModel:
         raise ValueError(f"Unknown model {key!r}. Choose one of: {options}") from None
 
 
-def model_artifact(model: PublishableModel, root: str | Path = ".") -> Path:
+def model_artifact(model: PublishableModel, root: str | Path | None = None) -> Path:
     """The saved weights for `model`, or a clear error if training never ran."""
-    path = Path(root) / model.directory / MODEL_FILENAME
+    from app.paths import PROJECT_ROOT
+
+    path = (
+        (PROJECT_ROOT if root is None else Path(root))
+        / model.directory
+        / MODEL_FILENAME
+    )
     if not path.is_file():
         raise FileNotFoundError(
             f"No trained {model.key} model at {path}. Train and save one first "
@@ -168,7 +174,7 @@ def publish_model(
     model_key: str,
     repo_id: str,
     token: str | None = None,
-    root: str | Path = ".",
+    root: str | Path | None = None,
     private: bool = True,
     dry_run: bool = False,
     now: datetime | None = None,

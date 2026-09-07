@@ -9,12 +9,23 @@ and defaults to ``data/cosmic.db`` under the project root.
 import json
 import os
 import sqlite3
-from contextlib import closing
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from threading import RLock, local
 from typing import Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_DB = os.path.join(_ROOT, "data", "cosmic.db")
+
+# A session token is good for a week, then the user re-logs in. The sessions
+# table has no other expiry, so without this a token stays valid forever and
+# the table only grows.
+_SESSION_TTL_SECONDS = 7 * 24 * 3600
+
+# How long a blocked writer waits for a lock before giving up. WAL keeps
+# readers and writers off each other's backs, but a checkpoint still takes a
+# brief exclusive lock.
+_BUSY_TIMEOUT_MS = 5000
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -67,26 +78,65 @@ CREATE INDEX IF NOT EXISTS idx_custom_objects_user ON custom_objects(user_id);
 
 # Which paths we've already run the schema against (schema is idempotent).
 _initialized: set = set()
+_initialize_lock = RLock()
+_worker_state = local()
 
 
 def _db_path() -> str:
     return os.environ.get("COSMIC_DB_PATH", _DEFAULT_DB)
 
 
-def get_conn() -> sqlite3.Connection:
-    """Open a connection, creating the schema on first use for this path."""
-    path = _db_path()
+def _open_connection(path: str) -> sqlite3.Connection:
+    """Open and configure one connection, initializing its database once."""
     if path != ":memory:":
         os.makedirs(os.path.dirname(path), exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    if path not in _initialized:
-        conn.executescript(_SCHEMA)
-        _migrate(conn)
-        conn.commit()
-        _initialized.add(path)
+    conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+    # WAL lets readers run while a write is in flight instead of blocking on it.
+    # It needs a real file; an in-memory DB stays on the default journal.
+    if path != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
+    with _initialize_lock:
+        if path not in _initialized:
+            conn.executescript(_SCHEMA)
+            _migrate(conn)
+            conn.commit()
+            _initialized.add(path)
     return conn
+
+
+def get_conn() -> sqlite3.Connection:
+    """Return a caller-owned connection for diagnostics or explicit SQL work."""
+    return _open_connection(_db_path())
+
+
+def _close_worker_connection() -> None:
+    """Close this thread's reusable connection (primarily lifecycle/test cleanup)."""
+    conn = getattr(_worker_state, "connection", None)
+    if conn is not None:
+        conn.close()
+        del _worker_state.connection
+        del _worker_state.path
+
+
+@contextmanager
+def _connection():
+    """Reuse one connection per worker thread and roll back failed operations."""
+    path = _db_path()
+    conn = getattr(_worker_state, "connection", None)
+    if conn is None or getattr(_worker_state, "path", None) != path:
+        if conn is not None:
+            conn.close()
+        conn = _open_connection(path)
+        _worker_state.connection = conn
+        _worker_state.path = path
+    try:
+        yield conn
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -102,6 +152,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _session_cutoff() -> str:
+    """The oldest `created_at` a session may have and still count as live.
+
+    Every stamp is UTC ISO-8601 from `_now()`, so a plain string compare is a
+    valid chronological one.
+    """
+    oldest = datetime.now(timezone.utc) - timedelta(seconds=_SESSION_TTL_SECONDS)
+    return oldest.isoformat()
+
+
 # ── Owned-row helpers ─────────────────────────────────────────────────────────
 # Saved searches, uploads and custom objects are all "rows belonging to a user"
 # and were three copies of the same insert/list/delete. Sharing them keeps the
@@ -115,7 +175,7 @@ def _now() -> str:
 def _insert_owned(table: str, columns: tuple[str, ...], values: tuple) -> int:
     """Insert one row with a `created_at` stamp; returns the new row id."""
     placeholders = ", ".join("?" for _ in range(len(columns) + 1))
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         cur = conn.execute(
             f"INSERT INTO {table} ({', '.join(columns)}, created_at) "
             f"VALUES ({placeholders})",
@@ -127,7 +187,7 @@ def _insert_owned(table: str, columns: tuple[str, ...], values: tuple) -> int:
 
 def _list_owned(table: str, user_id: int, to_dict) -> list:
     """Every row this user owns, newest first."""
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         rows = conn.execute(
             f"SELECT * FROM {table} WHERE user_id = ? ORDER BY id DESC", (user_id,)
         ).fetchall()
@@ -136,7 +196,7 @@ def _list_owned(table: str, user_id: int, to_dict) -> list:
 
 def _delete_owned(table: str, user_id: int, row_id: int) -> bool:
     """Delete one row only if this user owns it. False when there was no match."""
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         cur = conn.execute(
             f"DELETE FROM {table} WHERE id = ? AND user_id = ?", (row_id, user_id)
         )
@@ -152,7 +212,7 @@ def create_user(
     salt: str,
     is_admin: bool = False,
 ) -> int:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         cur = conn.execute(
             "INSERT INTO users (username, email, password_hash, salt, created_at, "
             "is_admin) VALUES (?, ?, ?, ?, ?, ?)",
@@ -163,35 +223,51 @@ def create_user(
 
 
 def set_user_admin(user_id: int, is_admin: bool) -> None:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         conn.execute(
             "UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id)
         )
         conn.commit()
 
 
+def set_user_credentials(
+    user_id: int, password_hash: str, salt: str, is_admin: bool = False
+) -> None:
+    """Atomically rotate a password and set the account's admin state."""
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, salt = ?, is_admin = ? WHERE id = ?",
+            (password_hash, salt, int(is_admin), user_id),
+        )
+        # Password rotation invalidates sessions issued under the old secret.
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        conn.commit()
+
+
 def get_user_by_username(username: str) -> Optional[sqlite3.Row]:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         return conn.execute(
             "SELECT * FROM users WHERE username = ?", (username,)
         ).fetchone()
 
 
 def get_user_by_id(user_id: int) -> Optional[sqlite3.Row]:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
 def set_user_theme(user_id: int, theme: str) -> None:
     """Persist the user's chosen UI theme to their profile."""
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         conn.execute("UPDATE users SET theme = ? WHERE id = ?", (theme, user_id))
         conn.commit()
 
 
 # ── sessions ──────────────────────────────────────────────────────────────────
 def create_session(user_id: int, token_hash: str) -> None:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
+        # Sweep expired rows on each login so the table doesn't grow forever.
+        conn.execute("DELETE FROM sessions WHERE created_at < ?", (_session_cutoff(),))
         conn.execute(
             "INSERT INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)",
             (token_hash, user_id, _now()),
@@ -200,16 +276,16 @@ def create_session(user_id: int, token_hash: str) -> None:
 
 
 def get_user_by_token(token_hash: str) -> Optional[sqlite3.Row]:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         return conn.execute(
             "SELECT u.* FROM users u JOIN sessions s ON s.user_id = u.id "
-            "WHERE s.token_hash = ?",
-            (token_hash,),
+            "WHERE s.token_hash = ? AND s.created_at >= ?",
+            (token_hash, _session_cutoff()),
         ).fetchone()
 
 
 def delete_session(token_hash: str) -> None:
-    with closing(get_conn()) as conn:
+    with _connection() as conn:
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
         conn.commit()
 

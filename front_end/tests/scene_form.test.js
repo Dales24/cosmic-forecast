@@ -21,6 +21,33 @@ describe('sceneResultHTML()', () => {
     expect(html).toContain('1 object loaded'); // singular
   });
 
+  test('labels selected debris coverage and deduplication', () => {
+    const html = app.sceneResultHTML('', '', '2026-12-25 00:00', {
+      ok: true, count: 2,
+      debrisCoverage: { label: 'All supported debris fields', duplicates_removed: 3 },
+    });
+    expect(html).toContain('Debris coverage: All supported debris fields');
+    expect(html).toContain('3 duplicates removed');
+  });
+
+  test('labels satellite fallback coverage', () => {
+    const html = app.sceneResultHTML('', '', '2026-12-25 00:00', {
+      ok: true, count: 2,
+      satelliteCoverage: { selected_label: 'Starlink subset', fallback: true },
+    });
+    expect(html).toContain('Satellite coverage: Starlink subset');
+    expect(html).toContain('fallback');
+  });
+
+  test('labels rocket-body name coverage', () => {
+    const html = app.sceneResultHTML('', '', '2026-12-25 00:00', {
+      ok: true, count: 2,
+      rocketBodyCoverage: { selected_label: 'Names containing R/B' },
+    });
+    expect(html).toContain('Rocket-body coverage: Names containing R/B');
+    expect(html).toContain('CelesTrak name selection');
+  });
+
   test('includes coordinates when both are given', () => {
     const html = app.sceneResultHTML('83.82', '-5.39', '2026-12-25 00:00', { ok: true, count: 2 });
     expect(html).toContain('83.82');
@@ -43,6 +70,88 @@ describe('sceneResultHTML()', () => {
 // ── loadScene() ───────────────────────────────────────────────────────────────
 
 describe('loadScene()', () => {
+  test('shows the rocket-body selection rule', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], rocket_body_coverage: {
+        selected_query: 'R/B', selected_label: 'Names containing R/B',
+      } }),
+    });
+
+    const result = await app.loadScene('2026-12-25T00:00:00Z');
+
+    expect(document.getElementById('rocket-body-coverage').textContent)
+      .toContain('Rocket-body coverage: Names containing R/B');
+    expect(result.rocketBodyCoverage.selected_query).toBe('R/B');
+  });
+
+  test('labels the selected CelesTrak query and failed fallback attempts', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], satellite_coverage: {
+        selected_query: 'starlink', selected_label: 'Starlink subset',
+        fallback: true, failed_attempts: [{ query: 'active', error: '403' }],
+      } }),
+    });
+
+    const result = await app.loadScene('2026-12-25T00:00:00Z');
+
+    const label = document.getElementById('satellite-coverage').textContent;
+    expect(label).toContain('Fallback coverage: Starlink subset');
+    expect(label).toContain('unavailable: active');
+    expect(result.satelliteCoverage.selected_query).toBe('starlink');
+  });
+  test('shows scene time and stale element metadata, clearing on recovery', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({
+      objects: [], datetime: '2025-01-01T00:00:00Z', source_freshness: [{
+        kind: 'satellite', stale: true, downloaded_at: 1735689600,
+        oldest_epoch: '2024-01-01T00:00:00Z',
+      }],
+    }) });
+    await app.loadScene('2025-01-01T00:00:00Z');
+    const warning = document.getElementById('source-warning');
+    expect(warning.hidden).toBe(false);
+    expect(warning.textContent).toContain('Using cached orbital data');
+    expect(warning.textContent).toContain('over 7 days old');
+    expect(document.getElementById('scene-timestamp').textContent).toContain('2025-01-01');
+    global.fetch.mockResolvedValue({ ok: true, json: async () => ({ objects: [] }) });
+    await app.loadScene();
+    expect(warning.hidden).toBe(true);
+  });
+  test('shows missing sources and clears the notice after recovery', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], source_warnings: [
+        { source: 'celestrak', kind: 'satellite' },
+      ] }),
+    });
+    expect((await app.loadScene('2026-12-25T00:00:00Z')).ok).toBe(true);
+    const notice = document.getElementById('source-warning');
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Map incomplete');
+    expect(notice.textContent).toContain('Satellite (celestrak)');
+    global.fetch.mockResolvedValue({
+      ok: true, json: async () => ({ objects: [], source_warnings: [] }),
+    });
+    await app.loadScene('2026-12-26T00:00:00Z');
+    expect(notice.hidden).toBe(true);
+    expect(notice.textContent).toBe('');
+  });
+
+  test('shows the specific debris field when combined coverage is partial', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], source_warnings: [{
+        source: 'celestrak', kind: 'space_debris',
+        detail: 'Unavailable debris fields: iridium-33',
+      }] }),
+    });
+
+    await app.loadScene('2026-12-25T00:00:00Z');
+
+    expect(document.getElementById('source-warning').textContent)
+      .toContain('Unavailable debris fields: iridium-33');
+  });
   test('sends the chosen datetime to the API and reports the count', async () => {
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,
@@ -55,6 +164,22 @@ describe('loadScene()', () => {
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
     expect(result.search).toBeNull();
+  });
+
+  test('sends the selected debris field and returns coverage metadata', async () => {
+    document.getElementById('debris-field').value = 'iridium-33';
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        objects: [], debris_coverage: { label: 'Iridium 33 debris' },
+      }),
+    }));
+
+    const result = await app.loadScene('2026-12-25T00:00:00Z');
+
+    expect(global.fetch.mock.calls[0][0]).toContain('debris_field=iridium-33');
+    expect(result.debrisCoverage.label).toBe('Iridium 33 debris');
+    document.getElementById('debris-field').value = 'all';
   });
 
   test('reports failure on a non-OK response, keeping the previous scene', async () => {

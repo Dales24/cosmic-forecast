@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.data_parser import (
+    DEBRIS_FIELDS,
     _TLE_CACHE_TTL_SECONDS,
     _parse_tle_text,
     fetch_celestrak,
@@ -80,21 +81,81 @@ def _mock_response(text=""):
 def test_fetch_celestrak_satellite_calls_correct_url(tmp_path):
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
         fetch_celestrak("satellite", limit=1)
     url = mock.call_args[0][0]
     assert "active" in url
 
 
-def test_fetch_celestrak_iss_calls_stations_url(tmp_path):
+def test_satellite_fallback_reports_selection_and_failed_candidates(tmp_path):
+    from app.metrics import source_failures
+
+    failed = _mock_response()
+    failed.raise_for_status.side_effect = RuntimeError("active unavailable")
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get",
+            side_effect=[failed, _mock_response(_ISS_TLE)],
+        ) as mock,
     ):
-        fetch_celestrak("iss", limit=1)
-    url = mock.call_args[0][0]
-    assert "stations" in url
+        text = fetch_celestrak_text("satellite")
+
+    assert mock.call_count == 2
+    assert text.coverage["selected_query"] == "starlink"
+    assert text.coverage["selected_label"] == "Starlink subset"
+    assert text.coverage["fallback"] is True
+    assert text.coverage["failed_attempts"][0]["query"] == "active"
+    failure_kinds = {row["kind"] for row in source_failures.snapshot()["sources"]}
+    assert "satellite:active" in failure_kinds
+
+
+def test_satellite_coverage_metadata_survives_disk_cache(tmp_path):
+    from app import data_parser
+
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
+        first = fetch_celestrak_text("satellite")
+        data_parser._tle_memory.clear()
+        with patch("app.data_parser.requests.get") as get:
+            cached = fetch_celestrak_text("satellite")
+
+    assert first.coverage["selected_query"] == "active"
+    assert cached.coverage == first.coverage
+    get.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("slug", "group"),
+    [("iss", "stations"), ("space_debris", "cosmos-2251-debris")],
+)
+def test_fetch_celestrak_uses_gp_group_url(tmp_path, slug, group):
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
+    ):
+        result = fetch_celestrak(slug, limit=1)
+    mock.assert_called_once_with(
+        f"https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=tle",
+        timeout=10,
+    )
+    assert result[0]["catalog_id"] == "25544"
+
+
+@pytest.mark.parametrize("field", ["cosmos-2251", "iridium-33", "fengyun-1c"])
+def test_debris_fields_have_celestrak_cache_routes(field):
+    from app.data_parser import _CELESTRAK_URLS, debris_cache_slug
+
+    slug = debris_cache_slug(field)
+    assert field in DEBRIS_FIELDS
+    assert f"GROUP={field}-debris" in _CELESTRAK_URLS[slug][0]
 
 
 def test_fetch_celestrak_parses_response(tmp_path):
@@ -182,16 +243,24 @@ def test_fetch_celestrak_text_raises_when_no_cache(tmp_path):
             fetch_celestrak_text("satellite")
 
 
-def test_fetch_celestrak_rocket_body_queries_by_name(tmp_path):
-    # CelesTrak has no rocket-body GROUP; it must query by the "R/B" name suffix.
+def test_fetch_celestrak_rocket_body_reports_name_selection(tmp_path):
+    # The GP API has no object-type filter, so expose the exact name selection.
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
-        patch("app.data_parser.requests.get", return_value=_mock_response("")) as mock,
+        patch(
+            "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
+        ) as mock,
     ):
-        fetch_celestrak("rocket_body", limit=1)
+        text = fetch_celestrak_text("rocket_body")
     url = mock.call_args[0][0]
     assert "NAME=R/B" in url
     assert "rocket-bodies" not in url
+    assert text.coverage == {
+        "selected_query": "R/B",
+        "selected_label": "Names containing R/B",
+        "fallback": False,
+        "failed_attempts": [],
+    }
 
 
 def test_fetch_celestrak_respects_limit():

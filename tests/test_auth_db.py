@@ -82,6 +82,32 @@ def test_logout_invalidates_token(client):
     assert client.get("/api/auth/me", headers=headers).status_code == 401
 
 
+def test_session_token_expires_after_its_ttl(client, monkeypatch):
+    """A token past its TTL is rejected even though the row still exists."""
+    from app import db
+
+    headers = _auth(client, "rip")
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
+    monkeypatch.setattr(db, "_SESSION_TTL_SECONDS", -1)
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+
+
+def test_login_sweeps_expired_sessions(client, monkeypatch):
+    """Expired rows are pruned on the next login, so the table can't only grow."""
+    from contextlib import closing
+
+    from app import db
+
+    _auth(client, "sweep_a")
+    _auth(client, "sweep_b")
+    monkeypatch.setattr(db, "_SESSION_TTL_SECONDS", -1)
+    _auth(client, "sweep_c")  # this login prunes the two now-stale rows first
+    monkeypatch.setattr(db, "_SESSION_TTL_SECONDS", 7 * 24 * 3600)
+    with closing(db.get_conn()) as conn:
+        remaining = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    assert remaining == 1
+
+
 # ── theme preference ──────────────────────────────────────────────────────────
 def test_theme_defaults_to_none(client):
     headers = _auth(client, "nina")
@@ -163,15 +189,76 @@ def test_admin_health_reports_scene_object_caps(client, monkeypatch):
     assert caps["kinds"][0]["kind"] == "satellite"
 
 
-def test_default_admin_bootstrap_login(client):
+def test_default_admin_bootstrap_login(client, monkeypatch):
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN", "1")
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN_PASSWORD", "local-secret-123")
     from app.api import _ensure_admin_user
 
     _ensure_admin_user()
     token = client.post(
-        "/api/auth/login", json={"username": "admin", "password": "admin"}
+        "/api/auth/login", json={"username": "admin", "password": "local-secret-123"}
     ).json()["token"]
     me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200 and me.json()["is_admin"] is True
+
+
+def test_default_admin_not_created_unless_env_set(client, monkeypatch):
+    """The guessable admin/admin login must stay off by default."""
+    monkeypatch.delenv("COSMIC_BOOTSTRAP_ADMIN", raising=False)
+    from app.api import _ensure_admin_user
+
+    _ensure_admin_user()
+    r = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+    assert r.status_code == 401
+
+
+def test_bootstrap_requires_an_explicit_strong_password(client, monkeypatch):
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN", "1")
+    monkeypatch.delenv("COSMIC_BOOTSTRAP_ADMIN_PASSWORD", raising=False)
+    from app.api import _ensure_admin_user
+
+    with pytest.raises(RuntimeError, match="COSMIC_BOOTSTRAP_ADMIN_PASSWORD"):
+        _ensure_admin_user()
+
+
+def test_bootstrap_rotates_existing_account_and_supports_username(client, monkeypatch):
+    client.post(
+        "/api/auth/register",
+        json={"username": "operator", "password": "previous-password"},
+    )
+    old_headers = _auth(client, "operator", "previous-password")
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN", "1")
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN_USERNAME", "operator")
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN_PASSWORD", "replacement-secret")
+    from app.api import _ensure_admin_user
+
+    _ensure_admin_user()
+    assert (
+        client.post(
+            "/api/auth/login",
+            json={"username": "operator", "password": "previous-password"},
+        ).status_code
+        == 401
+    )
+    assert client.get("/api/auth/me", headers=old_headers).status_code == 401
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "operator", "password": "replacement-secret"},
+    )
+    token = login.json()["token"]
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.json()["is_admin"] is True
+
+
+def test_bootstrap_with_unchanged_secret_preserves_sessions(client, monkeypatch):
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN", "1")
+    monkeypatch.setenv("COSMIC_BOOTSTRAP_ADMIN_PASSWORD", "stable-local-secret")
+    from app.api import _ensure_admin_user
+
+    _ensure_admin_user()
+    headers = _auth(client, "admin", "stable-local-secret")
+    _ensure_admin_user()
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
 
 
 # ── user-added scene objects ──────────────────────────────────────────────────
@@ -330,6 +417,51 @@ def test_admin_health_reports_source_failures(client, monkeypatch):
     assert data["source_failures"]["total"] == 1
     assert data["source_failures"]["sources"][0]["source"] == "simbad"
     assert data["source_failures"]["sources"][0]["kind"] == "galaxy"
+
+
+def test_connection_uses_wal_and_busy_timeout(tmp_path, monkeypatch):
+    """WAL keeps readers off writers; the busy timeout covers checkpoint locks."""
+    from contextlib import closing
+
+    monkeypatch.setenv("COSMIC_DB_PATH", str(tmp_path / "wal.db"))
+    from app import db
+
+    db._initialized.clear()
+    with closing(db.get_conn()) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    db._initialized.clear()
+
+
+def test_operations_reuse_connection_and_switch_database_paths(tmp_path, monkeypatch):
+    from unittest.mock import patch
+    from app import db
+
+    first = tmp_path / "first.db"
+    second = tmp_path / "second.db"
+    db._close_worker_connection()
+    monkeypatch.setenv("COSMIC_DB_PATH", str(first))
+    with patch("app.db.sqlite3.connect", wraps=db.sqlite3.connect) as connect:
+        user_id = db.create_user("first", None, "hash", "salt")
+        assert db.get_user_by_id(user_id)["username"] == "first"
+        assert connect.call_count == 1
+        monkeypatch.setenv("COSMIC_DB_PATH", str(second))
+        assert db.get_user_by_username("first") is None
+        assert connect.call_count == 2
+    db._close_worker_connection()
+
+
+def test_failed_operation_rolls_back_reused_connection(tmp_path, monkeypatch):
+    from app import db
+
+    monkeypatch.setenv("COSMIC_DB_PATH", str(tmp_path / "rollback.db"))
+    db._close_worker_connection()
+    db.create_user("unique", None, "hash", "salt")
+    with pytest.raises(Exception):
+        db.create_user("unique", None, "hash", "salt")
+    # The same connection remains usable after the failed transaction.
+    assert db.create_user("after", None, "hash", "salt") > 0
+    db._close_worker_connection()
 
 
 def test_per_user_lookups_use_an_index(tmp_path, monkeypatch):

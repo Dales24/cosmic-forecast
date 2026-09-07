@@ -8,7 +8,16 @@ document.body.innerHTML = `
   <canvas id="space-map" width="800" height="600"></canvas>
   <button id="play-btn">&#9654; Play Simulation</button>
   <div id="sim-time" style="display:none"></div>
-  <ul id="legend-list"></ul>
+  <label for="near-pass-effects">
+    <input id="near-pass-effects" type="checkbox">
+    Cosmetic projected near-pass flashes
+  </label>
+  <details class="map-legend" open>
+    <summary>Orbital Map</summary>
+    <div class="map-legend-content">
+      <ul id="legend-list"></ul>
+    </div>
+  </details>
   <div id="theme-switch">
     <select id="theme-select">
       <option value="default">Default</option>
@@ -24,6 +33,12 @@ document.body.innerHTML = `
     <input id="ra"           type="text">
     <input id="dec"          type="text">
     <input id="obs_datetime" type="datetime-local">
+    <select id="debris-field">
+      <option value="all">All supported fields</option>
+      <option value="cosmos-2251">Cosmos 2251 debris</option>
+      <option value="iridium-33">Iridium 33 debris</option>
+      <option value="fengyun-1c">Fengyun 1C debris</option>
+    </select>
     <input type="submit">
     <button type="button" id="clear-search">Clear</button>
   </form>
@@ -36,6 +51,10 @@ document.body.innerHTML = `
   </form>
   <p id="add-object-note"></p>
   <div id="scene-result"></div>
+  <p id="source-warning" role="status" hidden></p>
+  <p id="scene-timestamp"></p>
+  <p id="satellite-coverage"></p>
+  <p id="rocket-body-coverage"></p>
   <div id="obj-title"></div>
   <div id="obj-class"></div>
   <div id="obj-conf"></div>

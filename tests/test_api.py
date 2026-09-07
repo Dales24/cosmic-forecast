@@ -245,34 +245,15 @@ def test_forecast_empty_objects_list():
 # ── GET /api/scene ────────────────────────────────────────────────────────────
 
 
-def test_scene_always_includes_ufo():
-    """UFO entry is appended even when every data source fails."""
+def test_scene_does_not_fabricate_unidentified_objects():
+    """The live scene contains only sourced or computed objects."""
     with _offline_catalogs(
         patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
     ):
         r = client.get("/api/scene")
     assert r.status_code == 200
     kinds = [o["kind"] for o in r.json()["objects"]]
-    assert "ufo" in kinds
-
-
-def test_scene_ufo_has_required_fields():
-    with _offline_catalogs(
-        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("x"))
-    ):
-        r = client.get("/api/scene")
-    ufo = next(o for o in r.json()["objects"] if o["kind"] == "ufo")
-    for field in (
-        "id",
-        "name",
-        "kind",
-        "x_norm",
-        "y_norm",
-        "vx_norm",
-        "vy_norm",
-        "source",
-    ):
-        assert field in ufo, f"missing field: {field}"
+    assert "ufo" not in kinds
 
 
 def test_scene_accepts_datetime_str():
@@ -545,6 +526,68 @@ def test_scene_includes_all_orbital_categories():
         assert kind in kinds, f"missing {kind}"
 
 
+def test_scene_selects_one_debris_field_and_reports_it():
+    fetched = []
+
+    def fake_tle(slug):
+        fetched.append(slug)
+        return _ISS_TLE
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=fake_tle),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?debris_field=iridium-33")
+
+    assert r.status_code == 200
+    assert "space_debris_iridium_33" in fetched
+    assert "space_debris_cosmos_2251" not in fetched
+    coverage = r.json()["debris_coverage"]
+    assert coverage["label"] == "Iridium 33 debris"
+    debris = [o for o in r.json()["objects"] if o["kind"] == "space_debris"]
+    assert debris and debris[0]["debris_field"] == "iridium-33"
+
+
+def test_scene_all_debris_fields_deduplicate_catalog_ids():
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=_ISS_TLE),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?debris_field=all")
+
+    debris = [o for o in r.json()["objects"] if o["kind"] == "space_debris"]
+    assert len(debris) == 1
+    assert r.json()["debris_coverage"]["duplicates_removed"] == 2
+
+
+def test_scene_reports_a_partially_unavailable_debris_union():
+    def fake_tle(slug):
+        if slug == "space_debris_iridium_33":
+            raise OSError("offline")
+        return _ISS_TLE
+
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=fake_tle),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene?debris_field=all")
+
+    assert r.status_code == 200
+    assert r.json()["debris_coverage"]["unavailable_groups"] == ["iridium-33"]
+    warning = next(
+        row for row in r.json()["source_warnings"] if row["kind"] == "space_debris"
+    )
+    assert "iridium-33" in warning["detail"]
+
+
+def test_scene_rejects_unknown_debris_field():
+    r = client.get("/api/scene?debris_field=not-a-field")
+    assert r.status_code == 422
+
+
 def test_scene_is_cached_within_ttl():
     """A repeat scene load is served from cache and doesn't refetch catalogs."""
     calls = {"jpl": 0}
@@ -563,6 +606,59 @@ def test_scene_is_cached_within_ttl():
 
     assert first.status_code == 200 and second.status_code == 200
     assert calls["jpl"] == 1  # second request hit the cache, not the network
+
+
+def test_scene_returns_satellite_fallback_coverage():
+    from app.data_parser import TLEText
+
+    text = TLEText(
+        _ISS_TLE,
+        time.time(),
+        "2024-01-01T12:00:00Z",
+        {
+            "selected_query": "starlink",
+            "selected_label": "Starlink subset",
+            "fallback": True,
+            "failed_attempts": [{"query": "active", "error": "403"}],
+        },
+    )
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=text),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    coverage = r.json()["satellite_coverage"]
+    assert coverage["selected_query"] == "starlink"
+    assert coverage["fallback"] is True
+    assert coverage["failed_attempts"][0]["query"] == "active"
+
+
+def test_scene_returns_rocket_body_name_coverage():
+    from app.data_parser import TLEText
+
+    text = TLEText(
+        _ISS_TLE,
+        time.time(),
+        "2024-01-01T12:00:00Z",
+        {
+            "selected_query": "R/B",
+            "selected_label": "Names containing R/B",
+            "fallback": False,
+            "failed_attempts": [],
+        },
+    )
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=text),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    coverage = r.json()["rocket_body_coverage"]
+    assert coverage["selected_query"] == "R/B"
+    assert coverage["selected_label"] == "Names containing R/B"
 
 
 # ── Scene object caps ─────────────────────────────────────────────────────────
@@ -1052,6 +1148,15 @@ def test_scene_records_source_failures_instead_of_hiding_them():
         r = client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z")
 
     assert r.status_code == 200  # the scene still builds
+    warnings = r.json()["source_warnings"]
+    assert {row["source"] for row in warnings} == {"celestrak", "jpl", "simbad"}
+    assert all(set(row) == {"source", "kind"} for row in warnings)
+    assert (
+        client.get("/api/scene?datetime_str=2025-06-01T12:00:00Z").json()[
+            "source_warnings"
+        ]
+        == warnings
+    )
     snapshot = source_failures.snapshot()
     assert snapshot["total"] > 0
     sources = {row["source"] for row in snapshot["sources"]}
@@ -1080,5 +1185,6 @@ def test_healthy_scene_records_no_failures():
         patch("app.data_parser.fetch_jpl", return_value=[]),
         patch("app.data_parser.fetch_simbad", return_value=[]),
     ):
-        client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
+        response = client.get("/api/scene?datetime_str=2024-01-01T12:00:00Z")
+    assert response.json()["source_warnings"] == []
     assert source_failures.snapshot()["total"] == 0

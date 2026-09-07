@@ -33,7 +33,12 @@
       <p>On the map, enter an optional <strong>Right Ascension</strong> and
         <strong>Declination</strong> plus a date &amp; time (defaults to now), then
         click <strong>Load Scene</strong>. Real objects are pulled live from
-        CelesTrak, NASA JPL, and SIMBAD and placed on the map.</p>
+        CelesTrak, NASA JPL, and SIMBAD and placed on the map. Use
+        <strong>Debris field</strong> to show a named collision field or the
+        deduplicated union of all supported fields. The map legend identifies
+        which CelesTrak satellite query supplied the scene and clearly labels
+        fallback results as subset coverage. Rocket-body coverage is labelled
+        as CelesTrak's name-based <code>R/B</code> selection.</p>
     </div>
 
     <div class="page-card">
@@ -41,6 +46,8 @@
       <ul>
         <li><strong>Drag</strong> to pan around the map.</li>
         <li><strong>Scroll</strong> to zoom in and out.</li>
+        <li>Select a section heading in the Cosmic Forecast or object-detail
+          panel to collapse or expand that section.</li>
         <li>Objects stay frozen until you press Play.</li>
       </ul>
     </div>
@@ -66,7 +73,10 @@
       <h2><span class="num">05</span>Play the simulation</h2>
       <p>Press <strong>▶ Play Simulation</strong> to fast-forward at 200× real time.
         Objects advance along their real velocities, with dashed
-        machine-learning-predicted forecast paths overlaid.</p>
+        machine-learning-predicted forecast paths overlaid. The optional
+        <strong>Cosmetic projected near-pass flashes</strong> setting adds visual
+        bursts when moving marks overlap on the map. These flashes use the 2D
+        display projection and are not collision or conjunction predictions.</p>
     </div>
 
     <div class="page-card">
@@ -77,9 +87,10 @@
 
     <div class="page-card">
       <h2><span class="num">07</span>Themes</h2>
-      <p>Pick a look from the <strong>Theme</strong> dropdown — Default, Purple
+      <p>Pick a decorative look from the <strong>Theme</strong> dropdown — Default, Purple
         Cosmic, Van Gogh, Tim Burton, or Pirate. Each restyles the whole interface
-        and the sky. When you're logged in, your choice is saved to your profile.</p>
+        and the sky; non-default motifs are visual decoration. When you're logged
+        in, your choice is saved to your profile.</p>
     </div>
 
     <div class="page-card">

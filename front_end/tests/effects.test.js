@@ -233,3 +233,25 @@ describe('explosions', () => {
     expect(app.explosions).toHaveLength(0);
   });
 });
+
+describe('projected near-pass effect control', () => {
+  const toggle = document.getElementById('near-pass-effects');
+
+  test('is disabled by default and clearly marked as cosmetic', () => {
+    expect(toggle.checked).toBe(false);
+    expect(app.nearPassEffectsEnabled).toBe(false);
+    expect(toggle.parentElement.textContent).toMatch(/cosmetic projected near-pass/i);
+  });
+
+  test('requires an explicit opt-in and clears bursts when disabled', () => {
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    expect(app.nearPassEffectsEnabled).toBe(true);
+
+    app.spawnExplosions([{ i: 0, j: 1, x: 10, y: 20 }], 1000, '#fff');
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change'));
+    expect(app.nearPassEffectsEnabled).toBe(false);
+    expect(app.explosions).toHaveLength(0);
+  });
+});

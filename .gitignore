@@ -210,5 +210,4 @@ data/
 
 # Node / frontend
 front_end/node_modules/
-front_end/package-lock.json
 front_end/coverage/

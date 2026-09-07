@@ -8,6 +8,13 @@ For the full picture — the CNN → track → transformer → Kalman pipeline, 
 sources, API surface, accounts, and how to add a new detection — see
 [docs/architecture.md](docs/architecture.md).
 
+## Development context
+
+Repository-specific instructions for Codex and other contributors live in
+[`Codex/AGENTS.md`](Codex/AGENTS.md). The root [`AGENTS.md`](AGENTS.md) loads
+that file for every change. Keep the context file synchronized with supported
+commands, architecture, verification requirements, and project safeguards.
+
 ```
 app/
   api.py                     FastAPI backend — API routes + static file serving
@@ -31,7 +38,7 @@ front_end/
 |---------------|---------------------|----------|
 | Satellite     | CelesTrak (TLE)     | `/api/objects/satellite` |
 | ISS           | CelesTrak (TLE)     | `/api/objects/iss` |
-| Space debris  | CelesTrak (TLE)     | `/api/objects/space_debris` |
+| Space debris  | CelesTrak debris fields (TLE) | `/api/objects/space_debris` |
 | Rocket body   | CelesTrak (TLE)     | `/api/objects/rocket_body` |
 | Asteroid      | NASA JPL SBDB       | `/api/objects/asteroid` |
 | Comet         | NASA JPL SBDB       | `/api/objects/comet` |
@@ -83,10 +90,11 @@ front_end/
 | `limit` | `COSMIC_CAP_SATELLITE` | Override the satellite cap only |
 | `ra`, `dec` | — | Degrees. Give **both** to narrow the scene to a patch of sky; accepts `83.82` or `83.82°` |
 | `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
+| `debris_field` | `all` | `all`, `cosmos-2251`, `iridium-33`, or `fengyun-1c`; `all` deduplicates NORAD IDs |
 
 A position search adds a `search` block to the response (`matched`, `searched`,
-`radius_deg`). Objects with no real sky position — JPL near-Earth objects and
-the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-issues.md).
+`radius_deg`). Objects without real sky positions, including JPL near-Earth
+objects, are excluded; see [docs/known-issues.md](docs/known-issues.md).
 
 `GET /api/objects/{slug}` — `date=YYYY-MM-DD`, `limit=20`.
 
@@ -97,6 +105,9 @@ the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-is
 | `COSMIC_DB_PATH` | `data/cosmic.db` | SQLite database file |
 | `COSMIC_TLE_CACHE_DIR` | `data/tle_cache` | Where CelesTrak TLE text is cached on disk |
 | `COSMIC_ADMIN_USERS` | *(empty)* | Comma-separated usernames granted admin on registration |
+| `COSMIC_BOOTSTRAP_ADMIN` | *(unset)* | When truthy, create or rotate an explicitly configured bootstrap admin. |
+| `COSMIC_BOOTSTRAP_ADMIN_USERNAME` | `admin` | Username used by bootstrap admin creation. |
+| `COSMIC_BOOTSTRAP_ADMIN_PASSWORD` | *(required when enabled)* | Bootstrap secret; must contain at least 12 characters. Never commit it. |
 | `COSMIC_CAP_<KIND>` | see `app/config.py` | Per-kind cap on how many objects a catalog may add to a scene (e.g. `COSMIC_CAP_GALAXY=12`) |
 
 ### Caching
@@ -104,13 +115,17 @@ the UFO — are excluded from a search; see [docs/known-issues.md](docs/known-is
 Three layers, each keyed on what actually changes — see
 [docs/known-issues.md](docs/known-issues.md) for the freshness implications:
 
-- **Scene** (45s, max 64 entries) — whole assembled scenes by datetime/limit/search.
+- **Scene** (45s, max 64 entries) — whole assembled scenes by
+  datetime/limit/search/debris field.
 - **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
   scene datetime, so a new minute doesn't refetch static sky.
-- **TLE disk cache** (2h) — raw CelesTrak text, matching its publish cadence.
+- **TLE disk cache** (2h) — CelesTrak text plus selected-query and fallback
+  metadata, matching its publish cadence.
 
 External-source failures never break a scene; they are logged and surfaced at
-`/api/admin/health`.
+`/api/admin/health`. The map labels the selected satellite query and identifies
+fallback results as CelesTrak subsets. Rocket bodies are explicitly labelled as
+the CelesTrak `NAME=R/B` selection because the GP API has no object-type filter.
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 
