@@ -67,10 +67,10 @@ defines the class registry; `get_data` in
 
 | Layer | Key | Reuse and storage |
 | --- | --- | --- |
-| Scene | Raw datetime, limit, RA, Dec, radius | 45 seconds (30 for failures); process-local dictionary, maximum 64 entries; expiry pruning and oldest-entry eviction on insertion. |
+| Scene | Raw datetime, limit, RA, Dec, radius, debris field | 45 seconds (30 for failures); process-local dictionary, maximum 64 entries; expiry pruning and oldest-entry eviction on insertion. |
 | SIMBAD catalog | Source, kind, cap | 6 hours on success, 30 seconds on failure; shared 256-entry process-local catalog cache. |
 | JPL catalog | Source, requested date, cap | 1 hour on success, 30 seconds on failure; same catalog cache. |
-| TLE | Object slug | Disk text under `COSMIC_TLE_CACHE_DIR` (default `data/tle_cache`); refresh after 2 hours; 30-second failed-refresh retry; 24-hour maximum download age. |
+| TLE | Object slug | Disk text and query metadata under `COSMIC_TLE_CACHE_DIR` (default `data/tle_cache`); refresh after 2 hours; 30-second failed-refresh retry; 24-hour maximum download age. |
 
 Catalog entries are bounded and expired entries pruned on access. Per-key locks
 share concurrent misses; dictionary locks protect mutations without holding a
@@ -89,10 +89,11 @@ Scene fetch exceptions pass through `_source_unavailable`, which logs details,
 updates `metrics.source_failures`, and returns an empty result with source
 metadata. The UI displays a “Map incomplete” notice naming affected kinds and
 sources. Warnings survive cached responses and clear on a healthy response.
-Raw errors stay in admin reporting. A successful CelesTrak fallback to a smaller
-catalog still lacks a coverage
-notice; stale-download status is shown separately. See
-[`known-issues.md`](known-issues.md).
+Raw errors stay in admin reporting. Every failed CelesTrak candidate is recorded
+even if a later fallback succeeds. The selected satellite query, fallback flag,
+and failed attempts are persisted with the TLE and returned in
+`satellite_coverage`; the map labels every result as a CelesTrak subset and
+names fallback coverage. Stale-download status is shown separately.
 
 ## Classification and forecasting
 

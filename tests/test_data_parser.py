@@ -90,6 +90,46 @@ def test_fetch_celestrak_satellite_calls_correct_url(tmp_path):
     assert "active" in url
 
 
+def test_satellite_fallback_reports_selection_and_failed_candidates(tmp_path):
+    from app.metrics import source_failures
+
+    failed = _mock_response()
+    failed.raise_for_status.side_effect = RuntimeError("active unavailable")
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch(
+            "app.data_parser.requests.get",
+            side_effect=[failed, _mock_response(_ISS_TLE)],
+        ) as mock,
+    ):
+        text = fetch_celestrak_text("satellite")
+
+    assert mock.call_count == 2
+    assert text.coverage["selected_query"] == "starlink"
+    assert text.coverage["selected_label"] == "Starlink subset"
+    assert text.coverage["fallback"] is True
+    assert text.coverage["failed_attempts"][0]["query"] == "active"
+    failure_kinds = {row["kind"] for row in source_failures.snapshot()["sources"]}
+    assert "satellite:active" in failure_kinds
+
+
+def test_satellite_coverage_metadata_survives_disk_cache(tmp_path):
+    from app import data_parser
+
+    with (
+        patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
+        patch("app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)),
+    ):
+        first = fetch_celestrak_text("satellite")
+        data_parser._tle_memory.clear()
+        with patch("app.data_parser.requests.get") as get:
+            cached = fetch_celestrak_text("satellite")
+
+    assert first.coverage["selected_query"] == "active"
+    assert cached.coverage == first.coverage
+    get.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("slug", "group"),
     [("iss", "stations"), ("space_debris", "cosmos-2251-debris")],

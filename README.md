@@ -118,10 +118,12 @@ Three layers, each keyed on what actually changes — see
 - **Scene** (45s, max 64 entries) — whole assembled scenes by datetime/limit/search.
 - **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
   scene datetime, so a new minute doesn't refetch static sky.
-- **TLE disk cache** (2h) — raw CelesTrak text, matching its publish cadence.
+- **TLE disk cache** (2h) — CelesTrak text plus selected-query and fallback
+  metadata, matching its publish cadence.
 
 External-source failures never break a scene; they are logged and surfaced at
-`/api/admin/health`.
+`/api/admin/health`. The map labels the selected satellite query and identifies
+fallback results as CelesTrak subsets.
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 

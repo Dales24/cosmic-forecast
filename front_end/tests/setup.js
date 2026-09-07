@@ -53,6 +53,7 @@ document.body.innerHTML = `
   <div id="scene-result"></div>
   <p id="source-warning" role="status" hidden></p>
   <p id="scene-timestamp"></p>
+  <p id="satellite-coverage"></p>
   <div id="obj-title"></div>
   <div id="obj-class"></div>
   <div id="obj-conf"></div>

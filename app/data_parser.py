@@ -24,8 +24,10 @@ import os
 import time
 import tempfile
 import math
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from app.cache_lock import KeyLocks
 
 import requests
@@ -50,7 +52,7 @@ _tle_retry = {}
 class TLEText(str):
     """String-compatible text carrying the exact cached download's metadata."""
 
-    def __new__(cls, text, downloaded_at, oldest_epoch):
+    def __new__(cls, text, downloaded_at, oldest_epoch, coverage=None):
         value = super().__new__(cls, text)
         age = max(0, time.time() - downloaded_at)
         value.freshness = {
@@ -59,6 +61,7 @@ class TLEText(str):
             "stale": age >= _TLE_CACHE_TTL_SECONDS,
             "valid_until": downloaded_at + _TLE_MAX_STALE_SECONDS,
         }
+        value.coverage = coverage
         return value
 
 
@@ -178,6 +181,56 @@ def _tle_cache_path(slug: str) -> Path:
     return _TLE_CACHE_DIR / f"{slug}.tle"
 
 
+def _tle_metadata_path(slug: str) -> Path:
+    return _TLE_CACHE_DIR / f"{slug}.json"
+
+
+def _query_name(url: str) -> str:
+    query = parse_qs(urlparse(url).query)
+    return (query.get("GROUP") or query.get("NAME") or ["unknown"])[0]
+
+
+def _query_label(query: str) -> str:
+    return {
+        "active": "Active satellites",
+        "starlink": "Starlink subset",
+        "last-30-days": "Last 30 days subset",
+    }.get(query, query)
+
+
+def _read_tle_metadata(slug: str) -> dict:
+    try:
+        return json.loads(_tle_metadata_path(slug).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {
+            "selected_query": "unknown",
+            "selected_label": "Cached source (query unknown)",
+            "fallback": None,
+            "failed_attempts": [],
+        }
+
+
+def _write_tle_metadata(slug: str, metadata: dict) -> None:
+    path = _tle_metadata_path(slug)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+        ) as output:
+            temporary = Path(output.name)
+            json.dump(metadata, output)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _record_candidate_failure(slug: str, query: str, exc: Exception) -> None:
+    from app.metrics import source_failures
+
+    source_failures.record("celestrak", f"{slug}:{query}", str(exc))
+
+
 def _cached_tle_age(path: Path) -> float | None:
     """Seconds since the cache file was written, or None if there isn't one."""
     try:
@@ -208,25 +261,36 @@ def fetch_celestrak_text(slug: str) -> str:
             signature = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
             memory = _tle_memory.get(slug)
             if memory and memory[0] == signature:
-                text, epoch = memory[1:]
+                text, epoch, coverage = memory[1:]
             else:
                 text = path.read_text()
                 epoch = _validate_tle(text)
-                _tle_memory[slug] = (signature, text, epoch)
-            cached = TLEText(text, stat.st_mtime, epoch)
+                coverage = _read_tle_metadata(slug)
+                _tle_memory[slug] = (signature, text, epoch, coverage)
+            cached = TLEText(text, stat.st_mtime, epoch, coverage)
         except (OSError, ValueError):
             pass
         if cached and not cached.freshness["stale"]:
             return cached
         retry_path, retry_at = _tle_retry.get(slug, (None, 0))
+        failed_attempts = []
         if retry_path != str(path.resolve()) or time.monotonic() >= retry_at:
-            for url in urls:
+            for candidate_index, url in enumerate(urls):
+                query = _query_name(url)
                 try:
                     resp = requests.get(url, timeout=_TIMEOUT)
                     resp.raise_for_status()
                     epoch = _validate_tle(resp.text)
-                except Exception:
+                except Exception as exc:
+                    failed_attempts.append({"query": query, "error": str(exc)})
+                    _record_candidate_failure(slug, query, exc)
                     continue
+                coverage = {
+                    "selected_query": query,
+                    "selected_label": _query_label(query),
+                    "fallback": candidate_index > 0,
+                    "failed_attempts": failed_attempts,
+                }
                 path.parent.mkdir(parents=True, exist_ok=True)
                 temporary = None
                 try:
@@ -245,14 +309,20 @@ def fetch_celestrak_text(slug: str) -> str:
                         temporary.unlink(missing_ok=True)
                 stat = path.stat()
                 signature = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
-                _tle_memory[slug] = (signature, resp.text, epoch)
+                _write_tle_metadata(slug, coverage)
+                _tle_memory[slug] = (signature, resp.text, epoch, coverage)
                 _tle_retry.pop(slug, None)
-                return TLEText(resp.text, stat.st_mtime, epoch)
+                return TLEText(resp.text, stat.st_mtime, epoch, coverage)
             _tle_retry[slug] = (
                 str(path.resolve()),
                 time.monotonic() + _TLE_RETRY_SECONDS,
             )
         if cached and time.time() < cached.freshness["valid_until"]:
+            if failed_attempts:
+                cached.coverage = {
+                    **(cached.coverage or {}),
+                    "refresh_failed_attempts": failed_attempts,
+                }
             return cached
         raise RuntimeError(
             f"All CelesTrak sources failed for slug {slug!r}; no usable cache"

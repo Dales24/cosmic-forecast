@@ -306,6 +306,7 @@ async function loadScene(datetimeISO, search) {
   let ok = false;
   let matched = null;
   let debrisCoverage = null;
+  let satelliteCoverage = null;
   let invalid = false;
   let error = null;
   try {
@@ -331,6 +332,19 @@ async function loadScene(datetimeISO, search) {
     const timestamp = document.getElementById("scene-timestamp");
     if (timestamp) timestamp.textContent = data.datetime
       ? "Scene time: " + new Date(data.datetime).toISOString() : "";
+    satelliteCoverage = data.satellite_coverage || null;
+    const coverage = document.getElementById("satellite-coverage");
+    if (coverage) {
+      if (!satelliteCoverage) {
+        coverage.textContent = "";
+      } else {
+        const failed = satelliteCoverage.failed_attempts || [];
+        coverage.textContent = (satelliteCoverage.fallback ? "Fallback" : "Satellite") +
+          " coverage: " + satelliteCoverage.selected_label +
+          " (CelesTrak subset)" +
+          (failed.length ? "; unavailable: " + failed.map(row => row.query).join(", ") : "") + ".";
+      }
+    }
     const warning = document.getElementById("source-warning");
     if (warning) {
       const missing = (data.source_warnings || []).map(item =>
@@ -376,7 +390,7 @@ async function loadScene(datetimeISO, search) {
   else if (ok) resetView();
   return {
     ok, count: sceneObjects.length, search: matched,
-    debrisCoverage, invalid, error,
+    debrisCoverage, satelliteCoverage, invalid, error,
   };
 }
 
@@ -1824,11 +1838,16 @@ function sceneResultHTML(ra, dec, utcMinutes, result) {
           (result.debrisCoverage.duplicates_removed === 1 ? '' : 's') + ' removed)'
         : '') + '</p>'
     : '';
+  const satellite = result.satelliteCoverage
+    ? '<p>Satellite coverage: ' + esc(result.satelliteCoverage.selected_label) +
+      ' (CelesTrak subset' + (result.satelliteCoverage.fallback ? ', fallback' : '') + ')</p>'
+    : '';
   return '<div class="results">' +
       '<h3>' + (search ? 'Position Search' : 'Loaded Scene') + '</h3>' +
       coords +
       '<p>Time: ' + esc(utcMinutes) + ' UTC</p>' +
       tally +
+      satellite +
       debris +
       '<p style="margin-top:0.5rem;color:#7a9acc;font-size:0.82rem;">' +
         'Scene paused. Press &#9654; Play to simulate forward.' +

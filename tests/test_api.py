@@ -608,6 +608,33 @@ def test_scene_is_cached_within_ttl():
     assert calls["jpl"] == 1  # second request hit the cache, not the network
 
 
+def test_scene_returns_satellite_fallback_coverage():
+    from app.data_parser import TLEText
+
+    text = TLEText(
+        _ISS_TLE,
+        time.time(),
+        "2024-01-01T12:00:00Z",
+        {
+            "selected_query": "starlink",
+            "selected_label": "Starlink subset",
+            "fallback": True,
+            "failed_attempts": [{"query": "active", "error": "403"}],
+        },
+    )
+    with (
+        patch("app.data_parser.fetch_celestrak_text", return_value=text),
+        patch("app.data_parser.fetch_jpl", return_value=[]),
+        patch("app.data_parser.fetch_simbad", return_value=[]),
+    ):
+        r = client.get("/api/scene")
+
+    coverage = r.json()["satellite_coverage"]
+    assert coverage["selected_query"] == "starlink"
+    assert coverage["fallback"] is True
+    assert coverage["failed_attempts"][0]["query"] == "active"
+
+
 # ── Scene object caps ─────────────────────────────────────────────────────────
 # Caps live in app.config; every scene reports what they left out to the admin
 # monitor (app.metrics.scene_cap_report).

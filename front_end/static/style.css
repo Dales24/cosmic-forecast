@@ -206,6 +206,14 @@ body {
   margin-top: 0.4rem;
 }
 
+.catalog-coverage {
+  max-width: 240px;
+  margin-bottom: 0.45rem;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 /* ── Play controls ───────────────────────────────────────────────────────────── */
 .controls {
   display: flex;

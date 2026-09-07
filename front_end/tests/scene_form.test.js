@@ -30,6 +30,15 @@ describe('sceneResultHTML()', () => {
     expect(html).toContain('3 duplicates removed');
   });
 
+  test('labels satellite fallback coverage', () => {
+    const html = app.sceneResultHTML('', '', '2026-12-25 00:00', {
+      ok: true, count: 2,
+      satelliteCoverage: { selected_label: 'Starlink subset', fallback: true },
+    });
+    expect(html).toContain('Satellite coverage: Starlink subset');
+    expect(html).toContain('fallback');
+  });
+
   test('includes coordinates when both are given', () => {
     const html = app.sceneResultHTML('83.82', '-5.39', '2026-12-25 00:00', { ok: true, count: 2 });
     expect(html).toContain('83.82');
@@ -52,6 +61,22 @@ describe('sceneResultHTML()', () => {
 // ── loadScene() ───────────────────────────────────────────────────────────────
 
 describe('loadScene()', () => {
+  test('labels the selected CelesTrak query and failed fallback attempts', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], satellite_coverage: {
+        selected_query: 'starlink', selected_label: 'Starlink subset',
+        fallback: true, failed_attempts: [{ query: 'active', error: '403' }],
+      } }),
+    });
+
+    const result = await app.loadScene('2026-12-25T00:00:00Z');
+
+    const label = document.getElementById('satellite-coverage').textContent;
+    expect(label).toContain('Fallback coverage: Starlink subset');
+    expect(label).toContain('unavailable: active');
+    expect(result.satelliteCoverage.selected_query).toBe('starlink');
+  });
   test('shows scene time and stale element metadata, clearing on recovery', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({
       objects: [], datetime: '2025-01-01T00:00:00Z', source_freshness: [{
