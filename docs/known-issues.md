@@ -23,6 +23,7 @@ Start with MODEL-01, then DATA-02.
 - **DATA-02 · T2 · P2 — Rocket-body coverage relies on names.**
   `NAME=R/B` misses objects without that name fragment. Label the selection
   rule and investigate catalog object-type filtering for broader coverage.
+
 ## Positions, dates, and search
 
 - **POS-01 · T1 · P2 — Near-Earth object directions are placeholders.**

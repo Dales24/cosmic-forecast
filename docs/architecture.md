@@ -179,6 +179,9 @@ The browser runtime is a canvas SPA in [`app.js`](../front_end/static/app.js),
 with [`auth.js`](../front_end/static/auth.js) supplying account interactions.
 It handles scene loading, a source-availability notice, pan/zoom, kind filters,
 position search, simulation, themes, image/CSV uploads, and custom objects.
+The map legend, forecast controls, and object-detail groups use native
+collapsible disclosures. Primary scene-loading and object-detail content starts
+expanded; secondary controls start collapsed.
 Sun/Moon artwork and body lighting are synchronized with scene geometry. Theme
 motifs are decorative; opt-in near-pass flashes use projected proximity, not
 conjunction analysis. Browser runtime code has no package dependencies;

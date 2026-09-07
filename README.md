@@ -115,7 +115,8 @@ objects, are excluded; see [docs/known-issues.md](docs/known-issues.md).
 Three layers, each keyed on what actually changes — see
 [docs/known-issues.md](docs/known-issues.md) for the freshness implications:
 
-- **Scene** (45s, max 64 entries) — whole assembled scenes by datetime/limit/search.
+- **Scene** (45s, max 64 entries) — whole assembled scenes by
+  datetime/limit/search/debris field.
 - **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
   scene datetime, so a new minute doesn't refetch static sky.
 - **TLE disk cache** (2h) — CelesTrak text plus selected-query and fallback
