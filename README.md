@@ -124,7 +124,8 @@ Three layers, each keyed on what actually changes — see
 
 External-source failures never break a scene; they are logged and surfaced at
 `/api/admin/health`. The map labels the selected satellite query and identifies
-fallback results as CelesTrak subsets.
+fallback results as CelesTrak subsets. Rocket bodies are explicitly labelled as
+the CelesTrak `NAME=R/B` selection because the GP API has no object-type filter.
 
 Interactive docs at [`/docs`](http://localhost:8000/docs).
 

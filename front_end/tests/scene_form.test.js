@@ -39,6 +39,15 @@ describe('sceneResultHTML()', () => {
     expect(html).toContain('fallback');
   });
 
+  test('labels rocket-body name coverage', () => {
+    const html = app.sceneResultHTML('', '', '2026-12-25 00:00', {
+      ok: true, count: 2,
+      rocketBodyCoverage: { selected_label: 'Names containing R/B' },
+    });
+    expect(html).toContain('Rocket-body coverage: Names containing R/B');
+    expect(html).toContain('CelesTrak name selection');
+  });
+
   test('includes coordinates when both are given', () => {
     const html = app.sceneResultHTML('83.82', '-5.39', '2026-12-25 00:00', { ok: true, count: 2 });
     expect(html).toContain('83.82');
@@ -61,6 +70,21 @@ describe('sceneResultHTML()', () => {
 // ── loadScene() ───────────────────────────────────────────────────────────────
 
 describe('loadScene()', () => {
+  test('shows the rocket-body selection rule', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ objects: [], rocket_body_coverage: {
+        selected_query: 'R/B', selected_label: 'Names containing R/B',
+      } }),
+    });
+
+    const result = await app.loadScene('2026-12-25T00:00:00Z');
+
+    expect(document.getElementById('rocket-body-coverage').textContent)
+      .toContain('Rocket-body coverage: Names containing R/B');
+    expect(result.rocketBodyCoverage.selected_query).toBe('R/B');
+  });
+
   test('labels the selected CelesTrak query and failed fallback attempts', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,

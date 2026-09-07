@@ -16,13 +16,7 @@ inspection, not a security audit or load test.
 | P2 — Planned | Schedule after P1 work. |
 | P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
-Start with MODEL-01, then DATA-02.
-
-## Data sources
-
-- **DATA-02 · T2 · P2 — Rocket-body coverage relies on names.**
-  `NAME=R/B` misses objects without that name fragment. Label the selection
-  rule and investigate catalog object-type filtering for broader coverage.
+Start with MODEL-01.
 
 ## Positions, dates, and search
 

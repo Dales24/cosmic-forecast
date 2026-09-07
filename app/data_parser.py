@@ -139,8 +139,8 @@ _CELESTRAK_URLS: dict[str, list[str]] = {
     ],
     "space_debris_iridium_33": [f"{_CELESTRAK_GP}?GROUP=iridium-33-debris&FORMAT=tle"],
     "space_debris_fengyun_1c": [f"{_CELESTRAK_GP}?GROUP=fengyun-1c-debris&FORMAT=tle"],
-    # CelesTrak has no GP group for rocket bodies. They are catalogued with the
-    # "R/B" suffix in the object name, so query by NAME instead of GROUP.
+    # The GP API has no OBJECT_TYPE query. CelesTrak's catalog naming convention
+    # marks rocket bodies with R/B, so this is an explicitly labelled subset.
     "rocket_body": [f"{_CELESTRAK_GP}?NAME=R/B&FORMAT=tle"],
 }
 
@@ -195,6 +195,7 @@ def _query_label(query: str) -> str:
         "active": "Active satellites",
         "starlink": "Starlink subset",
         "last-30-days": "Last 30 days subset",
+        "R/B": "Names containing R/B",
     }.get(query, query)
 
 

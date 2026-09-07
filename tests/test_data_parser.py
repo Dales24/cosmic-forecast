@@ -243,18 +243,24 @@ def test_fetch_celestrak_text_raises_when_no_cache(tmp_path):
             fetch_celestrak_text("satellite")
 
 
-def test_fetch_celestrak_rocket_body_queries_by_name(tmp_path):
-    # CelesTrak has no rocket-body GROUP; it must query by the "R/B" name suffix.
+def test_fetch_celestrak_rocket_body_reports_name_selection(tmp_path):
+    # The GP API has no object-type filter, so expose the exact name selection.
     with (
         patch("app.data_parser._TLE_CACHE_DIR", tmp_path),
         patch(
             "app.data_parser.requests.get", return_value=_mock_response(_ISS_TLE)
         ) as mock,
     ):
-        fetch_celestrak("rocket_body", limit=1)
+        text = fetch_celestrak_text("rocket_body")
     url = mock.call_args[0][0]
     assert "NAME=R/B" in url
     assert "rocket-bodies" not in url
+    assert text.coverage == {
+        "selected_query": "R/B",
+        "selected_label": "Names containing R/B",
+        "fallback": False,
+        "failed_attempts": [],
+    }
 
 
 def test_fetch_celestrak_respects_limit():

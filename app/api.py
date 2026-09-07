@@ -376,8 +376,9 @@ def _celestrak_scene_objects(kind: str, dt: datetime, cap: int) -> CappedObjects
         True,
         freshness=getattr(tle_text, "freshness", None),
         metadata=(
-            {"satellite_coverage": tle_text.coverage}
-            if kind == "satellite" and getattr(tle_text, "coverage", None)
+            {f"{kind}_coverage": tle_text.coverage}
+            if kind in {"satellite", "rocket_body"}
+            and getattr(tle_text, "coverage", None)
             else None
         ),
     )
@@ -937,6 +938,13 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
     satellite_row = next((row for row in cap_rows if row["kind"] == "satellite"), None)
     if satellite_row and satellite_row.get("metadata"):
         result["satellite_coverage"] = satellite_row["metadata"]["satellite_coverage"]
+    rocket_body_row = next(
+        (row for row in cap_rows if row["kind"] == "rocket_body"), None
+    )
+    if rocket_body_row and rocket_body_row.get("metadata"):
+        result["rocket_body_coverage"] = rocket_body_row["metadata"][
+            "rocket_body_coverage"
+        ]
     result["source_freshness"] = [
         {"source": "celestrak", "kind": row["kind"], **row["freshness"]}
         for row in cap_rows

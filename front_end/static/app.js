@@ -307,6 +307,7 @@ async function loadScene(datetimeISO, search) {
   let matched = null;
   let debrisCoverage = null;
   let satelliteCoverage = null;
+  let rocketBodyCoverage = null;
   let invalid = false;
   let error = null;
   try {
@@ -344,6 +345,14 @@ async function loadScene(datetimeISO, search) {
           " (CelesTrak subset)" +
           (failed.length ? "; unavailable: " + failed.map(row => row.query).join(", ") : "") + ".";
       }
+    }
+    rocketBodyCoverage = data.rocket_body_coverage || null;
+    const rocketCoverage = document.getElementById("rocket-body-coverage");
+    if (rocketCoverage) {
+      rocketCoverage.textContent = rocketBodyCoverage
+        ? "Rocket-body coverage: " + rocketBodyCoverage.selected_label +
+          " (CelesTrak name selection)."
+        : "";
     }
     const warning = document.getElementById("source-warning");
     if (warning) {
@@ -390,7 +399,7 @@ async function loadScene(datetimeISO, search) {
   else if (ok) resetView();
   return {
     ok, count: sceneObjects.length, search: matched,
-    debrisCoverage, satelliteCoverage, invalid, error,
+    debrisCoverage, satelliteCoverage, rocketBodyCoverage, invalid, error,
   };
 }
 
@@ -1842,12 +1851,17 @@ function sceneResultHTML(ra, dec, utcMinutes, result) {
     ? '<p>Satellite coverage: ' + esc(result.satelliteCoverage.selected_label) +
       ' (CelesTrak subset' + (result.satelliteCoverage.fallback ? ', fallback' : '') + ')</p>'
     : '';
+  const rocketBody = result.rocketBodyCoverage
+    ? '<p>Rocket-body coverage: ' + esc(result.rocketBodyCoverage.selected_label) +
+      ' (CelesTrak name selection)</p>'
+    : '';
   return '<div class="results">' +
       '<h3>' + (search ? 'Position Search' : 'Loaded Scene') + '</h3>' +
       coords +
       '<p>Time: ' + esc(utcMinutes) + ' UTC</p>' +
       tally +
       satellite +
+      rocketBody +
       debris +
       '<p style="margin-top:0.5rem;color:#7a9acc;font-size:0.82rem;">' +
         'Scene paused. Press &#9654; Play to simulate forward.' +
