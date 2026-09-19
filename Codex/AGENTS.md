@@ -13,6 +13,10 @@ models for object classification and trajectory forecasting.
 - `app/api.py` owns API routes, scene assembly, and static-page serving.
 - `app/data_parser.py` fetches and normalizes CelesTrak, JPL, and SIMBAD data.
 - `app/ephemeris.py` computes local solar-system body positions.
+- `app/horizons.py` retrieves geometric JPL reference vectors for NEO placement
+  and sampled validation; `scripts/validate_ephemeris.py` records comparisons.
+- `app/orbital_forecast.py` and `scripts/train_orbital_forecast.py` support
+  experimental historical GP/OMM residual training, separate from the web forecast.
 - `app/db.py` and `app/auth.py` own SQLite persistence and authentication.
 - `app/pipeline.py` connects classification, track building, Transformer
   forecasting, and Kalman refinement.
@@ -51,6 +55,9 @@ models for object classification and trajectory forecasting.
 
 Use the repository root unless a command says otherwise. The supported Python
 version is exactly 3.12.
+Dependency markers select TensorFlow 2.21.0 on Windows and TensorFlow CPU
+2.16.2 elsewhere to retain Intel Mac compatibility. Keep the lockfile in sync
+and verify model behavior on the affected platform when changing these pins.
 
 ```powershell
 uv sync --group dev

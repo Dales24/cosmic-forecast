@@ -8,12 +8,10 @@ dependencies = [
     "uvicorn[standard]",
     "aiofiles",
     "numpy",
-    # 2.17+ dropped macOS x86_64 wheels; pin to the last cross-platform release.
-    # On Windows the `tensorflow-cpu` wheel is a 2 KB shim that pulls in
-    # `tensorflow-intel` (the package that actually carries the binaries), so
-    # depend on it directly there — the marker keeps macOS/Linux unchanged.
+    # Windows can upgrade independently while macOS/Linux retain their tested
+    # version, including the last TensorFlow release with Intel Mac wheels.
     "tensorflow-cpu==2.16.2; sys_platform != 'win32'",
-    "tensorflow-intel==2.16.2; sys_platform == 'win32'",
+    "tensorflow==2.21.0; sys_platform == 'win32'",
     "pandas",
     "earthaccess",
     "h5py",

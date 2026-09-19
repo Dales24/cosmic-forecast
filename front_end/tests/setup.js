@@ -53,6 +53,7 @@ document.body.innerHTML = `
   <div id="scene-result"></div>
   <p id="source-warning" role="status" hidden></p>
   <p id="scene-timestamp"></p>
+  <p id="propagation-warning" hidden></p>
   <p id="satellite-coverage"></p>
   <p id="rocket-body-coverage"></p>
   <div id="obj-title"></div>
@@ -67,6 +68,8 @@ document.body.innerHTML = `
   <div id="obj-orbit"></div>
   <div id="obj-radius"></div>
   <div id="obj-kind"></div>
+  <p id="obj-position-note" hidden></p>
+  <p id="obj-motion-note" hidden></p>
   <div id="obj-about">
     <p id="obj-desc"></p>
     <a id="obj-info-link" href="#">Further info &rarr;</a>

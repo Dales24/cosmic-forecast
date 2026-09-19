@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -16,4 +17,6 @@ def _clear_api_caches():
     _clear_scene_cache()
     _clear_catalog_cache()
     source_failures.reset()
-    yield
+    # Live Horizons calls are integration checks, not unit-test dependencies.
+    with patch("app.horizons.fetch_vectors", side_effect=ValueError("offline test")):
+        yield

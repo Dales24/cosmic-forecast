@@ -1,7 +1,8 @@
 """Low-precision geocentric ephemeris for the Sun, Moon, and planets.
 
-Pure math (no external services), good to roughly arc-minutes over 1800–2050 —
-plenty for placing bodies on the scene map. Everything is returned in the
+Pure math (no external services), intended for approximate scene placement.
+Sampled Horizons comparisons do not establish an accuracy bound; the abbreviated
+Moon model can differ by degrees over 1800–2050. Everything is returned in the
 equatorial frame the scene uses for direction: geocentric right ascension (the
 angle) plus distance from Earth in km (the radius).
 

@@ -25,7 +25,7 @@ repos:
 
       - id: end-of-file-fixer
         name: fix end of files
-        entry: uv run end-of-file-fixer
+        entry: uv run python -m pre_commit_hooks.end_of_file_fixer
         language: system
 
       - id: check-merge-conflict
