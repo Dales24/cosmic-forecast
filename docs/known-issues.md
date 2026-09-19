@@ -58,3 +58,4 @@ Before real-data training, review dataset provenance and evaluation splits.
   requires a platform-support change and compatibility testing. The user has
   confirmed continued multiplatform support, including Intel Macs, so retain
   the pin. CI covers Windows, Linux and Intel macOS; this session ran on Windows.
+-- plaform to fix

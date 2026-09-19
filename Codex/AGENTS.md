@@ -55,6 +55,9 @@ models for object classification and trajectory forecasting.
 
 Use the repository root unless a command says otherwise. The supported Python
 version is exactly 3.12.
+Dependency markers select TensorFlow 2.21.0 on Windows and TensorFlow CPU
+2.16.2 elsewhere to retain Intel Mac compatibility. Keep the lockfile in sync
+and verify model behavior on the affected platform when changing these pins.
 
 ```powershell
 uv sync --group dev

@@ -197,7 +197,10 @@ Frontend (canvas SPA) — Jest + jsdom:
 cd front_end && npm test
 ```
 
-> **Note:** TensorFlow 2.16 imports `distutils`, which Python 3.12 dropped from
+Windows selects TensorFlow 2.21.0 through dependency markers. Linux and Intel
+macOS retain TensorFlow CPU 2.16.2. See [platform policy](docs/environment.md#platform-policy).
+
+> **Note:** The retained TensorFlow 2.16 runtime imports `distutils`, which Python 3.12 dropped from
 > the stdlib. `setuptools<74` (pinned) restores it at runtime, and the root
 > `conftest.py` activates the shim before pytest collects any TF-importing test.
 
