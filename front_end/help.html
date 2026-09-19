@@ -39,6 +39,14 @@
         which CelesTrak satellite query supplied the scene and clearly labels
         fallback results as subset coverage. Rocket-body coverage is labelled
         as CelesTrak's name-based <code>R/B</code> selection.</p>
+      <p>The map compresses distance and mostly collapses declination; angle
+        follows right ascension. Nearby marks can be far apart in the sky, and
+        a circular sky search need not look circular here. Near-Earth object
+        placement is illustrative: JPL close-approach records supply no sky
+        direction, and the displayed radius uses approach distance rather than
+        current distance. Position searches report excluded categories and counts
+        for objects without coordinates. Earth remains as the observer and is
+        excluded from the search tally.</p>
     </div>
 
     <div class="page-card">
@@ -63,8 +71,10 @@
       <p>Click any object — including the Sun, Earth, Moon, and planets — to open
         its detail panel, which shows:</p>
       <ul>
-        <li>Its real name, data source, velocity, and orbital coordinates.</li>
-        <li>A CNN <strong>classification</strong> with a confidence score.</li>
+        <li>Its name, source, catalog speed where available, and projected map coordinates.</li>
+        <li>A CNN <strong>demo classification</strong> of a generated image patch.
+          The selected type influences the patch; this is not an observation
+          or independent identification of the object.</li>
         <li>An <strong>About</strong> fact and a <strong>Further info</strong> link.</li>
       </ul>
     </div>
@@ -72,8 +82,9 @@
     <div class="page-card">
       <h2><span class="num">05</span>Play the simulation</h2>
       <p>Press <strong>▶ Play Simulation</strong> to fast-forward at 200× real time.
-        Objects advance along their real velocities, with dashed
-        machine-learning-predicted forecast paths overlaid. The optional
+        Moving objects advance using their scene velocities, with dashed
+        linear-extrapolation forecast paths overlaid. JPL and SIMBAD objects
+        remain static; near-Earth motion is not modeled. The optional
         <strong>Cosmetic projected near-pass flashes</strong> setting adds visual
         bursts when moving marks overlap on the map. These flashes use the 2D
         display projection and are not collision or conjunction predictions.</p>
@@ -82,7 +93,9 @@
     <div class="page-card">
       <h2><span class="num">06</span>Classify an image</h2>
       <p>Use <strong>Classify Image Patch</strong> to drop in a telescope image and
-        have the CNN predict what kind of object it is.</p>
+        have the CNN predict what kind of object it is. This uses your uploaded
+        image, unlike the generated patches in map demo classification. Model
+        scores have not been validated as scientific confidence.</p>
     </div>
 
     <div class="page-card">

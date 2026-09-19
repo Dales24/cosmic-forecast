@@ -139,6 +139,9 @@ def test_classify_returns_valid_structure():
     assert "class" in data
     assert "confidence" in data
     assert "group" in data
+    assert data["input_source"] == "synthetic_patch"
+    assert data["is_demo"] is True
+    assert "not an observation" in data["notice"]
 
 
 def test_classify_uses_a_kind_specific_patch():
@@ -1027,6 +1030,44 @@ def test_classify_upload_returns_classification():
             )
     assert r.status_code == 200
     assert r.json()["class"] == "Galaxy"
+    assert r.json()["input_source"] == "uploaded_image"
+    assert r.json()["is_demo"] is False
+    assert "uploaded image" in r.json()["notice"]
+
+
+def test_search_reports_exclusions_and_provenance():
+    with (
+        patch("app.data_parser.fetch_celestrak_text", side_effect=Exception("offline")),
+        patch(
+            "app.data_parser.fetch_jpl",
+            return_value=[{"des": "Test NEO", "dist": "0.05"}],
+        ),
+        patch(
+            "app.data_parser.fetch_simbad",
+            return_value=[{"main_id": "Test star", "ra": 10, "dec": 20}],
+        ),
+    ):
+        full = client.get("/api/scene?datetime_str=2025-06-01").json()
+        narrow = client.get(
+            "/api/scene?datetime_str=2025-06-01&ra=0&dec=0&radius_deg=180"
+        ).json()
+        cached = client.get(
+            "/api/scene?datetime_str=2025-06-01&ra=0&dec=0&radius_deg=180"
+        ).json()
+    neo = next(obj for obj in full["objects"] if obj["source"] == "jpl")
+    assert "Illustrative placement" in neo["position_note"]
+    assert "Static" in neo["motion_note"]
+    assert all(
+        "Static" in obj["motion_note"]
+        for obj in full["objects"]
+        if obj["source"] == "simbad"
+    )
+    search = narrow["search"]
+    assert search["excluded_without_coordinates"] == {"near_earth_object": 1}
+    assert search["observer_count"] == 1
+    assert search["searched"] == len(full["objects"]) - 2
+    assert search["matched"] == len(narrow["objects"]) - 1
+    assert cached["search"] == search
 
 
 def test_classify_upload_resizes_to_64x64():

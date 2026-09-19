@@ -8,6 +8,13 @@ linear extrapolation rather than that full pipeline.
 
 ## Runtime structure
 
+The separate `app/orbital_forecast.py` module and
+`scripts/train_orbital_forecast.py` CLI support experimental historical GP/OMM
+training. A dense network learns TEME position residuals against SGP4, with
+training-only normalization and chronological, purged evaluation splits.
+It saves a standalone Keras artifact and provenance/evaluation report; it does
+not change the live forecast endpoint. See [historical training](historical-training.md).
+
 ```mermaid
 flowchart TD
     UI[Canvas SPA and account UI] --> API[FastAPI: app/api.py]
@@ -55,6 +62,21 @@ The map uses right ascension as angle and log geocentric distance as radius.
 This is a compressed visualization, not a literal sky chart: declination is
 mostly collapsed, and visual proximity does not imply physical proximity.
 SIMBAD coordinates are catalog-based; the JPL placeholder direction is not.
+The legend explains projection distortion and illustrative NEO placement.
+JPL records carry `position_note` and `motion_note`; SIMBAD records carry
+`motion_note`. Object details display these disclosures and clear them when
+selection changes. JPL/SIMBAD playback is explicitly labelled static.
+
+Search metadata reports excluded objects by kind in
+`excluded_without_coordinates`, plus `excluded_count` and `observer_count`.
+`searched` counts only coordinate-bearing candidates; `matched` counts only
+sky matches. Earth remains visible as observer, outside both counts. These
+disclosures are preserved in cached scene responses.
+
+Classification responses carry `input_source`, `is_demo` and `notice`. Map
+classification uses synthetic patches influenced by the requested kind; uploaded
+classification uses the submitted image. The UI labels demo output separately
+and describes scores as model output without validated scientific confidence.
 
 The scene's `_DEEP_SPACE_KINDS` currently includes galaxy, nebula, star, black
 hole, quasar, pulsar, and supernova remnant. The parser supports additional

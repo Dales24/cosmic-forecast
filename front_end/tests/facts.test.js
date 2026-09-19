@@ -24,6 +24,19 @@ describe('KIND_LINKS', () => {
 });
 
 describe('detail panel facts', () => {
+  test('shows provenance notes and clears them on the next object', () => {
+    app.sceneObjects = [
+      { kind: 'near_earth_object', x_norm: 0.1, y_norm: 0.1,
+        position_note: 'Illustrative placement', motion_note: 'Static in simulation' },
+      { kind: 'satellite', x_norm: 0.1, y_norm: 0.1 },
+    ];
+    app.showObjectInfo(0);
+    expect(document.getElementById('obj-position-note').textContent).toBe('Illustrative placement');
+    expect(document.getElementById('obj-motion-note').hidden).toBe(false);
+    app.showObjectInfo(1);
+    expect(document.getElementById('obj-position-note').textContent).toBe('');
+    expect(document.getElementById('obj-motion-note').hidden).toBe(true);
+  });
   test('shows the per-kind fact for a catalog object', () => {
     app.sceneObjects = [{ name: 'ISS (ZARYA)', kind: 'iss', x_norm: 0.1, y_norm: 0.1 }];
     app.objPositions = [{ x: 0, y: 0 }];

@@ -32,5 +32,5 @@ def test_object_detail_sections_are_collapsible():
 
     assert html.count('class="obj-section"') == 4
     assert 'class="obj-section" id="obj-about" open' in html
-    for title in ("Classification", "Coordinates", "Details", "About"):
+    for title in ("Demo classification", "Coordinates", "Details", "About"):
         assert f'class="obj-section-title">{title}</summary>' in html

@@ -333,6 +333,8 @@ def _fetch_jpl_objects(date_str: str, cap: int) -> CappedObjects:
                 "vy_norm": 0.0,
                 "speed_kms": speed_kms,
                 "source": "jpl",
+                "position_note": "Illustrative placement: JPL close-approach data supplies no sky direction. Display radius uses approach distance, not current distance.",
+                "motion_note": "Static in simulation; near-Earth motion is not modeled.",
             }
         )
     return CappedObjects(objects, hidden, hidden_exact)
@@ -493,6 +495,7 @@ def _fetch_simbad_objects(kind: str, cap: int) -> CappedObjects:
                 "vy_norm": 0.0,
                 "speed_kms": 0.0,
                 "source": "simbad",
+                "motion_note": "Static in simulation; catalog positions do not advance during playback.",
                 "ra_deg": ra % 360.0,
                 "dec_deg": dec,
             }
@@ -955,14 +958,24 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
             row["valid_until"] for row in result["source_freshness"]
         )
     if search_ra is not None and search_dec is not None:
-        total = len(objects)
+        excluded = {}
+        for obj in objects:
+            if obj["kind"] not in _UNPLACEABLE_KEEP_KINDS and (
+                obj.get("ra_deg") is None or obj.get("dec_deg") is None
+            ):
+                excluded[obj["kind"]] = excluded.get(obj["kind"], 0) + 1
+        observers = sum(obj["kind"] in _UNPLACEABLE_KEEP_KINDS for obj in objects)
+        total = len(objects) - sum(excluded.values()) - observers
         result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)
         result["search"] = {
             "ra_deg": search_ra,
             "dec_deg": search_dec,
             "radius_deg": radius_deg,
-            "matched": len(result["objects"]),
+            "matched": len(result["objects"]) - observers,
             "searched": total,
+            "excluded_without_coordinates": excluded,
+            "excluded_count": sum(excluded.values()),
+            "observer_count": observers,
         }
     _cache_scene(cache_key, result)
     return result
@@ -998,7 +1011,12 @@ def classify_object(obj_id: int, kind: str | None = None):
     else:
         rng = np.random.default_rng(seed=obj_id * 137 + 42)
         patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
-    return predict_patch(cnn, patch)
+    return {
+        **predict_patch(cnn, patch),
+        "input_source": "synthetic_patch",
+        "is_demo": True,
+        "notice": "Demo classification of a generated image patch, not an observation of the selected object. The requested kind influences the generated patch; the score is not verified object confidence.",
+    }
 
 
 @app.post("/api/upload/csv")
@@ -1091,7 +1109,12 @@ async def classify_upload(file: UploadFile = File(...)):
     from app.object_classifier import predict_patch
 
     cnn = _get_cnn()
-    return predict_patch(cnn, patch)
+    return {
+        **predict_patch(cnn, patch),
+        "input_source": "uploaded_image",
+        "is_demo": False,
+        "notice": "Classification uses your uploaded image. Model scores have not been validated as scientific confidence.",
+    }
 
 
 @app.post("/api/forecast")

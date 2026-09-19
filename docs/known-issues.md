@@ -16,43 +16,36 @@ inspection, not a security audit or load test.
 | P2 — Planned | Schedule after P1 work. |
 | P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
-Start with MODEL-01.
+Before real-data training, review dataset provenance and evaluation splits.
 
 ## Positions, dates, and search
 
-- **POS-01 · T1 · P2 — Near-Earth object directions are placeholders.**
+- **POS-01 · T2 · P2 — Near-Earth object directions are placeholders.**
   CAD supplies approach distance but no sky direction; placement uses a
-  deterministic angle. Label placement as illustrative until per-object
-  ephemerides provide real coordinates.
+  deterministic angle. Placement is now labelled illustrative in the map and
+  object details, including the use of approach distance rather than current
+  distance. Real directions and motion still require per-object ephemerides.
 - **POS-02 · T2 · P2 — Satellite dates do not select historical elements.**
   Available TLEs are propagated to any requested time. Accuracy degrades away
   from their epoch. Define and validate a propagation interval; the current
   seven-day element-age notice does not establish an accuracy guarantee.
-- **POS-03 · T2 · P2 — JPL/SIMBAD objects stay static in simulation.**
-  Their scene velocities are zero. This is a display simplification for distant
-  objects, but does not model near-Earth motion. Add JPL ephemeris-based motion
-  or explicitly label those objects as static.
-- **POS-04 · T2 · P2 — Projection distorts apparent proximity.**
-  Declination is mostly collapsed. Adjacent map objects can be far apart in
-  the sky; spherical position-search results need not look circular on the map.
-  Explain the projection or add an RA/Dec sky view.
-- **POS-05 · T2 · P2 — Search omits objects without coordinates.**
-  Near-Earth objects are excluded; Earth remains as observer. Report excluded
-  categories so empty results are clear.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
   Validate `app/ephemeris.py` against a reference over the supported date range
   before advertising an accuracy bound or supporting telescope pointing.
 
 ## Classification and models
 
-- **MODEL-01 · T1 · P1 — Map classifications use synthetic images.**
-  `/api/classify/{id}` classifies a generated patch, not an observation of the
-  selected object. Clearly label this as a demo and distinguish it from
-  uploaded-image classification. Real claims require real observations.
 - **MODEL-02 · T1 · P2 — Synthetic training does not establish scientific validity.**
   Supplied training uses generated patches and synthetic linear tracks.
   Obtain representative data and evaluate
   on held-out observations before presenting scientific performance claims.
+
+- **MODEL-03 · T2 · P2 — Historical orbital model needs real-data evaluation.**
+  The GP/OMM residual-training pipeline is implemented, but no historical
+  dataset has been supplied or trained. Later GP estimates are proxy targets,
+  not independent position measurements. Validate against representative
+  reference positions and assess orbit, lead-time and unseen-object performance
+  before integration. See [historical training](historical-training.md).
 
 ## Environment and verification
 

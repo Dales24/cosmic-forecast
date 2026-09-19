@@ -10,6 +10,13 @@ sources, API surface, accounts, and how to add a new detection — see
 
 ## Development context
 
+Historical satellite/debris model training is available through
+`python -m scripts.train_orbital_forecast`. It learns experimental corrections
+to SGP4 from local GP/OMM history and compares them against an SGP4 baseline.
+See [historical training](docs/historical-training.md) for the data contract,
+date splits, commands and limitations. No historical training data or trained
+orbital weights are included.
+
 Repository-specific instructions for Codex and other contributors live in
 [`Codex/AGENTS.md`](Codex/AGENTS.md). The root [`AGENTS.md`](AGENTS.md) loads
 that file for every change. Keep the context file synchronized with supported
@@ -92,9 +99,19 @@ front_end/
 | `radius_deg` | `30` | Cone half-angle around `ra`/`dec` (0–180) |
 | `debris_field` | `all` | `all`, `cosmos-2251`, `iridium-33`, or `fengyun-1c`; `all` deduplicates NORAD IDs |
 
-A position search adds a `search` block to the response (`matched`, `searched`,
-`radius_deg`). Objects without real sky positions, including JPL near-Earth
-objects, are excluded; see [docs/known-issues.md](docs/known-issues.md).
+A position search adds a `search` block with `matched`, `searched`, `radius_deg`,
+`excluded_count`, `excluded_without_coordinates` (counts by kind), and
+`observer_count`. Objects without sky coordinates are excluded; Earth is retained
+as the observer and omitted from both search counts. The UI reports exclusions.
+The compressed map mostly collapses declination, so visual proximity does not
+imply proximity in the sky. JPL near-Earth placement is labelled illustrative;
+JPL/SIMBAD objects are labelled static during playback.
+
+Map classification is a demo using a generated image patch influenced by the
+selected kind. Its API response identifies `input_source: synthetic_patch` and
+`is_demo: true`. Uploaded-image classification uses the supplied image and returns
+`input_source: uploaded_image`, `is_demo: false`. Both responses include a
+provenance notice; neither model score establishes scientific confidence.
 
 `GET /api/objects/{slug}` — `date=YYYY-MM-DD`, `limit=20`.
 

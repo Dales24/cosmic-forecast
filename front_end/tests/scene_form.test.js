@@ -8,6 +8,16 @@ const app = global._app;
 // ── sceneResultHTML() ─────────────────────────────────────────────────────────
 
 describe('sceneResultHTML()', () => {
+  test('explains excluded categories and the observer on an empty search', () => {
+    const html = app.sceneResultHTML('0', '0', '2026-01-01', {
+      ok: true, count: 1, search: { matched: 0, searched: 10, radius_deg: 1,
+        excluded_count: 2, excluded_without_coordinates: { near_earth_object: 2 }, observer_count: 1 },
+    });
+    expect(html).toContain('0 of 10');
+    expect(html).toContain('Excluded without sky coordinates:');
+    expect(html).toContain(': 2');
+    expect(html).toContain('not counted as a search match');
+  });
   test('reports the time and object count on success', () => {
     const html = app.sceneResultHTML('', '', '2026-12-25 00:00', { ok: true, count: 42 });
     expect(html).toContain('Loaded Scene');
