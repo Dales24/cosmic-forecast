@@ -8,6 +8,15 @@ const app = global._app;
 // ── sceneResultHTML() ─────────────────────────────────────────────────────────
 
 describe('sceneResultHTML()', () => {
+  test('shows and clears satellite propagation warnings when scenes change', async () => {
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ objects: [], propagation_policy: { outside_count: 3 } }) });
+    await app.loadScene();
+    expect(document.getElementById('propagation-warning').textContent).toContain('3 satellite/debris');
+    expect(document.getElementById('propagation-warning').hidden).toBe(false);
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ objects: [] }) });
+    await app.loadScene();
+    expect(document.getElementById('propagation-warning').hidden).toBe(true);
+  });
   test('explains excluded categories and the observer on an empty search', () => {
     const html = app.sceneResultHTML('0', '0', '2026-01-01', {
       ok: true, count: 1, search: { matched: 0, searched: 10, radius_deg: 1,

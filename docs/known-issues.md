@@ -20,18 +20,21 @@ Before real-data training, review dataset provenance and evaluation splits.
 
 ## Positions, dates, and search
 
-- **POS-01 · T2 · P2 — Near-Earth object directions are placeholders.**
-  CAD supplies approach distance but no sky direction; placement uses a
-  deterministic angle. Placement is now labelled illustrative in the map and
-  object details, including the use of approach distance rather than current
-  distance. Real directions and motion still require per-object ephemerides.
+- **POS-01 · T2 · P2 — NEO playback uses a linear tangent.**
+  Horizons supplies real scene-time positions and velocities for up to ten
+  CAD candidates per scene. Failed queries retain explicitly illustrative,
+  static fallbacks and source warnings. Playback uses a linear velocity tangent,
+  not continuous orbital propagation; long-duration motion still needs work.
 - **POS-02 · T2 · P2 — Satellite dates do not select historical elements.**
   Available TLEs are propagated to any requested time. Accuracy degrades away
-  from their epoch. Define and validate a propagation interval; the current
-  seven-day element-age notice does not establish an accuracy guarantee.
+  from their epoch. Objects now report signed epoch offsets and flag dates
+  outside a +/-7-day display policy. The map summarizes these extrapolations.
+  The policy is not an accuracy guarantee; historical validation remains open.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
-  Validate `app/ephemeris.py` against a reference over the supported date range
-  before advertising an accuracy bound or supporting telescope pointing.
+  A 252-position Horizons comparison across 1800–2050 is complete; see
+  [sampled results](ephemeris-validation.md). Moon differences reach about
+  3.06 degrees. Fix the lunar approximation and validate more densely before
+  advertising an accuracy bound or supporting telescope pointing.
 
 ## Classification and models
 
@@ -52,4 +55,6 @@ Before real-data training, review dataset provenance and evaluation splits.
 - **TOOL-01 · T2 · P2 — TensorFlow pin constrains upgrades.**
   Retained intentionally: TensorFlow 2.16 is the last release supporting
   [macOS x86](https://www.tensorflow.org/install/pip). A newer TensorFlow
-  requires an explicit platform-support decision and compatibility testing.
+  requires a platform-support change and compatibility testing. The user has
+  confirmed continued multiplatform support, including Intel Macs, so retain
+  the pin. CI covers Windows, Linux and Intel macOS; this session ran on Windows.

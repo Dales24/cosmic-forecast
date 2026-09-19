@@ -28,7 +28,8 @@
         <div class="map-legend-content">
           <p id="scene-timestamp"></p>
           <p class="hint">Compressed map: angle follows right ascension; distance is compressed and declination is mostly collapsed. Nearby marks may be far apart in the sky. Search circles may look distorted.</p>
-          <p class="hint">Near-Earth object placement is illustrative. JPL and SIMBAD objects remain static during playback.</p>
+          <p class="hint">NEOs use Horizons positions when available; fallback placement is illustrative and static. SIMBAD objects remain static.</p>
+          <p id="propagation-warning" class="hint" role="status" hidden></p>
           <p id="satellite-coverage" class="catalog-coverage"></p>
           <p id="rocket-body-coverage" class="catalog-coverage"></p>
           <p id="source-warning" role="status" aria-live="polite" hidden></p>
@@ -244,7 +245,7 @@
           <a class="obj-info-link" id="obj-info-link" href="#" rel="noopener">Further info &rarr;</a>
         </details>
 
-        <p class="hint">Press <strong>&#9654; Play Simulation</strong> to view linear extrapolations of moving objects. JPL and SIMBAD objects stay static.</p>
+        <p class="hint">Press <strong>&#9654; Play Simulation</strong> to view linear extrapolations. Illustrative NEO fallbacks and SIMBAD objects stay static.</p>
       </div>
 
     </div>

@@ -13,6 +13,10 @@ models for object classification and trajectory forecasting.
 - `app/api.py` owns API routes, scene assembly, and static-page serving.
 - `app/data_parser.py` fetches and normalizes CelesTrak, JPL, and SIMBAD data.
 - `app/ephemeris.py` computes local solar-system body positions.
+- `app/horizons.py` retrieves geometric JPL reference vectors for NEO placement
+  and sampled validation; `scripts/validate_ephemeris.py` records comparisons.
+- `app/orbital_forecast.py` and `scripts/train_orbital_forecast.py` support
+  experimental historical GP/OMM residual training, separate from the web forecast.
 - `app/db.py` and `app/auth.py` own SQLite persistence and authentication.
 - `app/pipeline.py` connects classification, track building, Transformer
   forecasting, and Kalman refinement.

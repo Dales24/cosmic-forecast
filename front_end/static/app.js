@@ -330,6 +330,14 @@ async function loadScene(datetimeISO, search) {
     }
     const data = await resp.json();
     sceneObjects = data.objects || [];
+    const propagationWarning = document.getElementById("propagation-warning");
+    if (propagationWarning) {
+      const outside = data.propagation_policy?.outside_count || 0;
+      propagationWarning.textContent = outside
+        ? outside + " satellite/debris objects are outside the +/-7-day TLE display policy. Positions are long-range extrapolations, not validated historical positions."
+        : "";
+      propagationWarning.hidden = !outside;
+    }
     const timestamp = document.getElementById("scene-timestamp");
     if (timestamp) timestamp.textContent = data.datetime
       ? "Scene time: " + new Date(data.datetime).toISOString() : "";

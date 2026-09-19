@@ -1105,12 +1105,23 @@ _ISS_TLE = (
 def test_propagate_tles_produces_valid_position():
     dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     result = _propagate_tles(_ISS_TLE, dt, limit=1, kind="iss")
+    assert result[0]["outside_propagation_policy"] is False
+    assert result[0]["tle_epoch_offset_days"] == pytest.approx(0)
     assert len(result) == 1
     obj = result[0]
     assert obj["kind"] == "iss"
     assert obj["source"] == "celestrak"
-    assert abs(obj["x_norm"]) < 1.0  # within GEO distance
+    assert abs(obj["x_norm"]) < 1.0
     assert abs(obj["y_norm"]) < 1.0
+
+
+@pytest.mark.parametrize("day", [9, 20])
+def test_tle_outside_epoch_policy_is_disclosed(day):
+    result = _propagate_tles(
+        _ISS_TLE, datetime(2024, 1, day, 12, tzinfo=timezone.utc), limit=1, kind="iss"
+    )
+    assert result[0]["outside_propagation_policy"] is True
+    assert "not an accuracy guarantee" in result[0]["motion_note"]
 
 
 def test_propagate_tles_radius_in_leo_band():

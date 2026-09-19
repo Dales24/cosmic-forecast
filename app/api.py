@@ -146,7 +146,21 @@ def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[
             )
             err, r, v = sat.sgp4(jd, fr)
             if err == 0 and r:
-                results.append(_tle_scene_object(l1[2:7].strip(), name, kind, r, v))
+                obj = _tle_scene_object(l1[2:7].strip(), name, kind, r, v)
+                offset = (jd - sat.jdsatepoch) + (fr - sat.jdsatepochF)
+                obj["tle_epoch_offset_days"] = offset
+                obj["propagation_policy_days"] = 7
+                obj["outside_propagation_policy"] = abs(offset) > 7
+                obj["motion_note"] = (
+                    f"Propagated {offset:+.2f} days from the available TLE epoch. "
+                    + (
+                        "Outside the +/-7-day display policy; long-range extrapolation. "
+                        if abs(offset) > 7
+                        else "Within the +/-7-day display policy. "
+                    )
+                    + "This is not an accuracy guarantee; historical elements were not selected."
+                )
+                results.append(obj)
         except Exception:
             pass
     return results
@@ -338,6 +352,56 @@ def _fetch_jpl_objects(date_str: str, cap: int) -> CappedObjects:
             }
         )
     return CappedObjects(objects, hidden, hidden_exact)
+
+
+def _jpl_positioned_objects(dt: datetime, cap: int) -> CappedObjects:
+    """Resolve CAD candidates with Horizons, retaining disclosed fallbacks."""
+    from app.horizons import fetch_vectors
+
+    def fetch():
+        catalog = _jpl_scene_objects(dt.strftime("%Y-%m-%d"), cap)
+        objects, failed = [], 0
+        # Serial Horizons requests respect the service's one-request-at-a-time policy.
+        for index, candidate in enumerate(catalog.objects):
+            obj = dict(candidate)
+            try:
+                if index >= 10:
+                    raise ValueError("Horizons per-scene request cap reached")
+                vector = fetch_vectors(f"DES={obj['name']};", [dt])[0]
+                r, v = vector[:3], vector[3:]
+                distance = float(np.linalg.norm(r))
+                ra = atan2(r[1], r[0])
+                x, y = _radec_scene_xy(ra, distance)
+                future = r + v  # one-second geometric tangent for display velocity
+                fx, fy = _radec_scene_xy(
+                    atan2(future[1], future[0]), float(np.linalg.norm(future))
+                )
+                obj.update(
+                    x_norm=x,
+                    y_norm=y,
+                    vx_norm=fx - x,
+                    vy_norm=fy - y,
+                    ra_deg=degrees(ra) % 360,
+                    dec_deg=degrees(asin(r[2] / distance)),
+                    speed_kms=float(np.linalg.norm(v)),
+                    position_note="JPL Horizons geometric geocentric ICRF position at the scene time; radius uses current distance.",
+                    motion_note="Playback uses a linear tangent to the Horizons velocity, not a continuously recomputed orbit.",
+                    position_source="jpl_horizons",
+                )
+            except Exception as exc:
+                failed += 1
+                _source_unavailable("jpl_horizons", "near_earth_object", exc)
+            objects.append(obj)
+        return CappedObjects(
+            objects,
+            catalog.hidden,
+            catalog.hidden_exact,
+            "jpl_horizons" if failed else catalog.unavailable_source,
+        )
+
+    return _cached_catalog(
+        ("jpl_positioned", dt.isoformat(), cap), _JPL_TTL_SECONDS, fetch
+    )
 
 
 # Deep-space kinds pulled into every scene from SIMBAD (the kind is also the
@@ -627,6 +691,7 @@ def _moon_scene_object(dt: datetime) -> dict:
             "Earth's only natural satellite; its gravity drives the ocean tides "
             "and it always shows us the same face."
         ),
+        "position_note": "Approximate lunar position for display. Historical sample comparisons with Horizons differ by up to about 3 degrees; not validated for pointing.",
     }
 
 
@@ -734,7 +799,7 @@ def _capped_scene_objects(
         _debris_scene_objects, dt, caps["space_debris"], debris_field
     )
     fetchers["near_earth_object"] = partial(
-        _jpl_scene_objects, date_str, caps["near_earth_object"]
+        _jpl_positioned_objects, dt, caps["near_earth_object"]
     )
     fetchers.update(
         {
@@ -924,6 +989,12 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
             for row in cap_rows
             if row.get("unavailable_source")
         ],
+    }
+    outside = sum(bool(obj.get("outside_propagation_policy")) for obj in objects)
+    result["propagation_policy"] = {
+        "days_from_epoch": 7,
+        "outside_count": outside,
+        "accuracy_validated": False,
     }
     debris_row = next((row for row in cap_rows if row["kind"] == "space_debris"), None)
     if debris_row and debris_row.get("metadata"):

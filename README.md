@@ -104,8 +104,14 @@ A position search adds a `search` block with `matched`, `searched`, `radius_deg`
 `observer_count`. Objects without sky coordinates are excluded; Earth is retained
 as the observer and omitted from both search counts. The UI reports exclusions.
 The compressed map mostly collapses declination, so visual proximity does not
-imply proximity in the sky. JPL near-Earth placement is labelled illustrative;
-JPL/SIMBAD objects are labelled static during playback.
+imply proximity in the sky. Fallback near-Earth placement is labelled illustrative;
+SIMBAD objects and illustrative NEO fallbacks are labelled static during playback.
+Up to ten NEOs per scene receive geometric positions and velocities from JPL
+Horizons; playback uses a linear velocity tangent. Horizons failures retain
+disclosed fallbacks and source warnings. Satellites report TLE epoch offsets
+and flag dates outside a +/-7-day display policy, which is not an accuracy bound.
+See [sampled ephemeris validation](docs/ephemeris-validation.md) for measured
+differences against Horizons, including the remaining lunar limitation.
 
 Map classification is a demo using a generated image patch influenced by the
 selected kind. Its API response identifies `input_source: synthetic_patch` and
@@ -134,8 +140,8 @@ Three layers, each keyed on what actually changes — see
 
 - **Scene** (45s, max 64 entries) — whole assembled scenes by
   datetime/limit/search/debris field.
-- **Catalog** (SIMBAD 6h, JPL 1h) — keyed on each source's real inputs, not the
-  scene datetime, so a new minute doesn't refetch static sky.
+- **Catalog** (SIMBAD 6h, JPL 1h) — static catalogs use their source inputs.
+  Horizons-backed NEO positions additionally key on the exact scene datetime.
 - **TLE disk cache** (2h) — CelesTrak text plus selected-query and fallback
   metadata, matching its publish cadence.
 

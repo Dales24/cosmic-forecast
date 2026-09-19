@@ -54,18 +54,22 @@ The frontend merges the signed-in user's custom objects after loading the scene.
 | Source | Query and scene behavior |
 | --- | --- |
 | CelesTrak | GP queries with explicit `FORMAT=tle`; sgp4 propagates elements to the requested datetime. `iss` uses `stations`; debris can select Cosmos 2251, Iridium 33, Fengyun 1C, or their deduplicated union. Rocket bodies use and visibly disclose `NAME=R/B`: SATCAT has object types, but the GP endpoint has no object-type query. Satellites try `active`, `starlink`, then `last-30-days`. |
-| JPL CAD | Near-Earth approaches from the requested date through 30 days later. Approach distance is real; displayed direction is a deterministic placeholder. |
+| JPL CAD + Horizons | CAD supplies candidates from the requested date through 30 days later. Up to ten are resolved to scene-time geometric geocentric ICRF vectors by Horizons. Failed or capped lookups retain labelled illustrative static placement based on CAD approach distance. |
 | SIMBAD | TAP/ADQL queries by object type. Positions use catalog RA/Dec; deep-space distance is represented by an outer display band. |
 | Local ephemeris | Approximate Sun, Moon, and planet coordinates from `app/ephemeris.py`; no external request per scene. |
 
 The map uses right ascension as angle and log geocentric distance as radius.
 This is a compressed visualization, not a literal sky chart: declination is
 mostly collapsed, and visual proximity does not imply physical proximity.
-SIMBAD coordinates are catalog-based; the JPL placeholder direction is not.
+SIMBAD coordinates are catalog-based. Horizons supplies NEO directions and
+current distances; fallback JPL placement supplies no sky direction.
 The legend explains projection distortion and illustrative NEO placement.
 JPL records carry `position_note` and `motion_note`; SIMBAD records carry
 `motion_note`. Object details display these disclosures and clear them when
-selection changes. JPL/SIMBAD playback is explicitly labelled static.
+selection changes. SIMBAD and fallback NEO playback is explicitly labelled
+static. Horizons-backed playback uses the projected one-second velocity tangent,
+not a continuously recomputed orbit. Source failures remain visible even when
+an illustrative fallback is retained.
 
 Search metadata reports excluded objects by kind in
 `excluded_without_coordinates`, plus `excluded_count` and `observer_count`.
@@ -92,6 +96,7 @@ defines the class registry; `get_data` in
 | Scene | Raw datetime, limit, RA, Dec, radius, debris field | 45 seconds (30 for failures); process-local dictionary, maximum 64 entries; expiry pruning and oldest-entry eviction on insertion. |
 | SIMBAD catalog | Source, kind, cap | 6 hours on success, 30 seconds on failure; shared 256-entry process-local catalog cache. |
 | JPL catalog | Source, requested date, cap | 1 hour on success, 30 seconds on failure; same catalog cache. |
+| Horizons NEO scene | Exact UTC scene datetime, cap | 1 hour on success, 30 seconds on failure; same bounded catalog cache. At most ten serial requests per scene; 15-second HTTP timeout per request. Requests are serialized within each process. |
 | TLE | Object slug | Disk text and query metadata under `COSMIC_TLE_CACHE_DIR` (default `data/tle_cache`); refresh after 2 hours; 30-second failed-refresh retry; 24-hour maximum download age. |
 
 Catalog entries are bounded and expired entries pruned on access. Per-key locks
@@ -106,6 +111,15 @@ scene reuse cannot exceed that deadline. Element epochs can be older than the
 download, so the UI separately warns about elements older than 7 days.
 Scene hits reuse positions; rebuilds propagate available elements without
 making them newer. The UI displays the returned scene timestamp.
+Each propagated object includes its signed `tle_epoch_offset_days`,
+`outside_propagation_policy` and a motion notice. Scene `propagation_policy`
+summarizes objects outside +/-7 days. This display policy flags extrapolation;
+it neither suppresses objects nor establishes accuracy or selects historical TLEs.
+
+`scripts.validate_ephemeris` compares local approximations to geometric Horizons
+vectors and saves reference vectors and sampled differences under ignored data/.
+See [validation results](ephemeris-validation.md); the Moon approximation remains
+unsuitable for precise historical pointing.
 
 Scene fetch exceptions pass through `_source_unavailable`, which logs details,
 updates `metrics.source_failures`, and returns an empty result with source
