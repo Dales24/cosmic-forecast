@@ -42,6 +42,10 @@ Before real-data training, review dataset provenance and evaluation splits.
   Supplied training uses generated patches and synthetic linear tracks.
   Obtain representative data and evaluate
   on held-out observations before presenting scientific performance claims.
+  Folder-based training now uses the same 0–1 pixel scale as prediction,
+  and synthetic CLI training preserves every class in both partitions.
+  Real-image directory splitting is still random by image; use independent
+  object/session holdouts when designing scientific evaluation.
 
 - **MODEL-03 · T2 · P2 — Historical orbital model needs real-data evaluation.**
   The GP/OMM residual-training pipeline is implemented, but no historical
@@ -49,13 +53,3 @@ Before real-data training, review dataset provenance and evaluation splits.
   not independent position measurements. Validate against representative
   reference positions and assess orbit, lead-time and unseen-object performance
   before integration. See [historical training](historical-training.md).
-
-## Environment and verification
-
-- **TOOL-01 · T2 · P2 — TensorFlow pin constrains upgrades.**
-  Retained intentionally: TensorFlow 2.16 is the last release supporting
-  [macOS x86](https://www.tensorflow.org/install/pip). A newer TensorFlow
-  requires a platform-support change and compatibility testing. The user has
-  confirmed continued multiplatform support, including Intel Macs, so retain
-  the pin. CI covers Windows, Linux and Intel macOS; this session ran on Windows.
--- plaform to fix

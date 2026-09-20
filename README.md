@@ -204,6 +204,12 @@ macOS retain TensorFlow CPU 2.16.2. See [platform policy](docs/environment.md#pl
 > the stdlib. `setuptools<74` (pinned) restores it at runtime, and the root
 > `conftest.py` activates the shim before pytest collects any TF-importing test.
 
+Classifier folder training scales pixels to 0–1, matching inference. Synthetic
+CLI training splits examples per class so every class appears in training and
+validation (at least two examples per class are required). Real-image directory
+splits are random by image; scientific evaluation needs independent held-out
+objects or observing sessions to avoid related-image leakage.
+
 ## Publishing a model
 
 Models are pushed to Hugging Face by `scripts/publish_model.py`. It is a **dry

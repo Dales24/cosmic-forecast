@@ -23,6 +23,7 @@ from app.object_classifier import (  # noqa: E402
     load_image_dataset,
     save_model,
     train_model,
+    stratified_split,
 )
 
 
@@ -66,7 +67,12 @@ def parse_args() -> argparse.Namespace:
         help="Train on synthetic patches (useful for smoke tests)",
     )
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--samples-per-class", type=int, default=64)
+    parser.add_argument(
+        "--samples-per-class",
+        type=int,
+        default=64,
+        help="Synthetic examples per class (at least 2 for train/validation splitting)",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -108,13 +114,13 @@ def main() -> None:
             images, labels = generate_synthetic_dataset(
                 samples_per_class=args.samples_per_class
             )
-            split = int(len(labels) * 0.8)
+            x_train, y_train, x_val, y_val = stratified_split(images, labels)
             train_model(
                 model,
-                images[:split],
-                labels[:split],
-                images[split:],
-                labels[split:],
+                x_train,
+                y_train,
+                x_val,
+                y_val,
                 epochs=args.epochs,
             )
 

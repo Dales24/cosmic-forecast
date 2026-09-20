@@ -138,6 +138,12 @@ names fallback coverage. Stale-download status is shown separately.
 
 ## Classification and forecasting
 
+Classifier directory loading rescales image pixels from 0–255 to 0–1, matching
+array-based training and inference, including dark byte-valued patches. The
+synthetic training CLI uses a seeded per-class split with disjoint partitions.
+Real directory datasets still use Keras' random image split; object/session-level
+holdouts remain necessary for scientific validation.
+
 ### Web request behavior
 
 `_get_cnn` lazily creates a CNN and trains it on a small synthetic dataset on
