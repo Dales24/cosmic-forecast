@@ -143,6 +143,10 @@ array-based training and inference, including dark byte-valued patches. The
 synthetic training CLI uses a seeded per-class split with disjoint partitions.
 Real directory datasets still use Keras' random image split; object/session-level
 holdouts remain necessary for scientific validation.
+`app/classifier_data.py` supports explicit CSV partitions via the classifier
+CLI's `--manifest` option. It validates group and input disjointness, normalizes
+pixels and reports class counts. Test evaluation runs only after completed
+training; see [classifier holdouts](classifier-evaluation.md).
 
 ### Web request behavior
 

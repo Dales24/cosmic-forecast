@@ -209,6 +209,9 @@ CLI training splits examples per class so every class appears in training and
 validation (at least two examples per class are required). Real-image directory
 splits are random by image; scientific evaluation needs independent held-out
 objects or observing sessions to avoid related-image leakage.
+Use `--manifest` for explicit group-disjoint train/validation/test partitions,
+or `--manifest ... --prepare-only` to validate data before training. See
+[classifier holdouts](docs/classifier-evaluation.md) for the CSV format and reports.
 
 ## Publishing a model
 

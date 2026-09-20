@@ -2,6 +2,7 @@
 """Train the patch-based object classifier."""
 
 import argparse
+import json
 import signal
 import sys
 from pathlib import Path
@@ -57,6 +58,16 @@ def train_and_persist(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="CSV with path,label,group,split and explicit train/validation/test holdouts",
+    )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Validate --manifest and report counts without training",
+    )
+    parser.add_argument(
         "--data-dir",
         type=Path,
         help="Directory with one subfolder per class slug (e.g. data/asteroid/)",
@@ -97,8 +108,32 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if not args.data_dir and not args.synthetic:
-        raise SystemExit("Provide --data-dir with labeled patches or use --synthetic")
+    if (
+        sum(bool(value) for value in (args.manifest, args.data_dir, args.synthetic))
+        != 1
+    ):
+        raise SystemExit("Choose exactly one of --manifest, --data-dir or --synthetic")
+    if args.prepare_only and not args.manifest:
+        raise SystemExit("--prepare-only requires --manifest")
+    if args.manifest and args.resume_from is not None:
+        raise SystemExit(
+            "Manifest runs require a fresh model: prior training provenance is unknown"
+        )
+    if args.epochs < 1:
+        raise SystemExit("--epochs must be positive")
+    partitions, report = None, None
+    if args.manifest:
+        from app.classifier_data import load_manifest
+        from app.paths import PROJECT_ROOT
+
+        if not args.manifest.is_absolute():
+            args.manifest = PROJECT_ROOT / args.manifest
+        partitions, report = load_manifest(args.manifest)
+        if args.prepare_only:
+            print(json.dumps(report, indent=2))
+            return
+        if args.output.exists():
+            raise SystemExit("Manifest runs require a new output directory")
 
     if args.resume_from is not None:
         # Empty string means "no name supplied" → load the newest archive.
@@ -106,8 +141,17 @@ def main() -> None:
     else:
         model = create_cnn_model()
 
+    completed = False
+
     def train() -> None:
-        if args.data_dir:
+        nonlocal completed
+        if partitions is not None:
+            model.fit(
+                *partitions["train"],
+                validation_data=partitions["validation"],
+                epochs=args.epochs,
+            )
+        elif args.data_dir:
             train_ds, val_ds = load_image_dataset(args.data_dir)
             model.fit(train_ds, validation_data=val_ds, epochs=args.epochs)
         else:
@@ -123,8 +167,18 @@ def main() -> None:
                 y_val,
                 epochs=args.epochs,
             )
+        completed = True
 
     output = train_and_persist(model, args.output, train, archive=not args.no_archive)
+    if report is not None:
+        report["status"] = "completed" if completed else "interrupted"
+        if completed:
+            report["test_metrics"] = model.evaluate(
+                *partitions["test"], verbose=0, return_dict=True
+            )
+        (output / "evaluation.json").write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8"
+        )
     print(f"Saved model to {output}")
 
 

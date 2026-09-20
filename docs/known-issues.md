@@ -44,8 +44,7 @@ Before real-data training, review dataset provenance and evaluation splits.
   on held-out observations before presenting scientific performance claims.
   Folder-based training now uses the same 0–1 pixel scale as prediction,
   and synthetic CLI training preserves every class in both partitions.
-  Real-image directory splitting is still random by image; use independent
-  object/session holdouts when designing scientific evaluation.
+  See MODEL-04 for holdout integrity and the legacy directory loader.
 
 - **MODEL-03 · T2 · P2 — Historical orbital model needs real-data evaluation.**
   The GP/OMM residual-training pipeline is implemented, but no historical
@@ -53,3 +52,17 @@ Before real-data training, review dataset provenance and evaluation splits.
   not independent position measurements. Validate against representative
   reference positions and assess orbit, lead-time and unseen-object performance
   before integration. See [historical training](historical-training.md).
+
+- **MODEL-04 · T2 · P1 — Real-image holdout integrity needs dataset review.**
+  The new manifest workflow enforces disjoint groups, rejects repeated inputs
+  across partitions and evaluates an explicit test set after training. Group
+  assignments and near-duplicates still need review on the real dataset.
+  Legacy `--data-dir` remains randomly split by image with no independent test
+  set. Use [classifier holdouts](classifier-evaluation.md) before real-data runs.
+
+- **MODEL-05 · T2 · P2 — Cross-platform model portability is unverified.**
+  CI now exchanges trained synthetic classifier, trajectory and orbital artifacts
+  among Windows TensorFlow 2.21 and Linux/Intel macOS TensorFlow 2.16 and checks
+  inference outputs. Only the same-runtime Windows check has run locally;
+  cross-platform CI results are pending. This checks inference, not optimizer
+  resume compatibility or all future trained artifacts.

@@ -37,6 +37,11 @@ needed by the older runtime remain enabled. This configures native Windows CPU
 TensorFlow; it does not add native Windows CUDA support.
 Model serialization is tested within each platform's runtime; cross-version
 artifact portability must be checked before sharing trained models between them.
+CI's `model-portability` job downloads synthetic trained artifacts from all
+three producer platforms and compares inference for all three model architectures
+with relative tolerance 1e-4 and absolute tolerance 1e-5. It is also required by
+the release job. Local same-runtime success is not evidence of cross-platform
+success; optimizer-state resume compatibility is outside this check.
 Apple Silicon is not covered by this CI matrix.
 The Windows 2.21.0 runtime passed the full 450-test backend suite on 2026-09-20,
 including training and model save/load checks. Linux/macOS execution remains
