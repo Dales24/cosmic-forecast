@@ -124,7 +124,11 @@ it neither suppresses objects nor establishes accuracy or selects historical TLE
 `scripts.validate_ephemeris` compares local approximations to geometric Horizons
 vectors and saves reference vectors and sampled differences under ignored data/.
 See [validation results](ephemeris-validation.md); the Moon approximation remains
-unsuitable for precise historical pointing.
+unsuitable for precise historical pointing. The former abbreviated lunar series
+has been replaced by local `pyerfa` Moon98 (GCRS). Input civil time is converted
+to TT using ERFA's UTC/TAI table for 1960 onward and historical delta-T estimates
+earlier. Future leap seconds are not predicted. No network is needed at runtime
+for lunar positions.
 
 Scene fetch exceptions pass through `_source_unavailable`, which logs details,
 updates `metrics.source_failures`, and returns an empty result with source

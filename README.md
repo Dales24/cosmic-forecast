@@ -111,7 +111,9 @@ Horizons; playback uses a linear velocity tangent. Horizons failures retain
 disclosed fallbacks and source warnings. Satellites report TLE epoch offsets
 and flag dates outside a +/-7-day display policy, which is not an accuracy bound.
 See [sampled ephemeris validation](docs/ephemeris-validation.md) for measured
-differences against Horizons, including the remaining lunar limitation.
+differences against Horizons. Lunar positions use local ERFA Moon98 calculations
+in GCRS with terrestrial-time conversion; historical/future time uncertainty and
+unsampled dates still limit accuracy claims.
 
 Map classification is a demo using a generated image patch influenced by the
 selected kind. Its API response identifies `input_source: synthetic_patch` and

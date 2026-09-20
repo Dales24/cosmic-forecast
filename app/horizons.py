@@ -16,8 +16,8 @@ _request_lock = Lock()
 
 def fetch_vectors(command, dates):
     """One bounded request; callers own caching and source-failure reporting."""
-    if not dates or len(dates) > 100:
-        raise ValueError("Supply between 1 and 100 dates")
+    if not dates or len(dates) > 50:
+        raise ValueError("Supply between 1 and 50 dates")
     params = {
         "format": "json",
         "COMMAND": f"'{command}'",

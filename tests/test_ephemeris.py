@@ -7,6 +7,48 @@ import pytest
 
 from app import ephemeris
 
+
+# JPL Horizons: target 301, center 500@399, geometric ICRF vectors, UTC input.
+# Retrieved 2026-09-20; fixed references keep regressions independent of network.
+@pytest.mark.parametrize(
+    "year,xyz",
+    [
+        (1800, (396128.7529367695, 30860.10192782005, -7712.90478733641)),
+        (1850, (-321065.3279393155, 161599.4361221236, 72954.20259972815)),
+        (1900, (114417.1769038338, -323782.2898176595, -124088.4990442399)),
+        (1950, (106028.4721480495, 337134.9700781353, 179319.9818915324)),
+        (2000, (-262121.7685015786, -293953.9054548166, -88682.35809446021)),
+        (2026, (53752.42566938213, 313249.4597561493, 169827.6738198773)),
+        (2050, (327050.7213087169, 176104.9782905012, 93782.87678473604)),
+    ],
+)
+def test_moon_against_independent_horizons_reference(year, xyz):
+    ra, dec, distance = ephemeris.moon_geocentric(
+        datetime(year, 1, 2, tzinfo=timezone.utc)
+    )
+    ref_distance = math.sqrt(sum(value * value for value in xyz))
+    unit = (math.cos(dec) * math.cos(ra), math.cos(dec) * math.sin(ra), math.sin(dec))
+    cosine = sum(a * b for a, b in zip(unit, xyz)) / ref_distance
+    error = math.degrees(math.acos(max(-1, min(1, cosine))))
+    assert error < 0.01  # Regression threshold for these dates, not a universal bound.
+    assert abs(distance - ref_distance) < 30
+
+
+def test_lunar_time_conversion_and_timezone_equivalence():
+    from datetime import timedelta
+
+    assert ephemeris._tt_offset_seconds(
+        datetime(2000, 1, 1, tzinfo=timezone.utc)
+    ) == pytest.approx(64.184)
+    assert ephemeris._tt_offset_seconds(
+        datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ) == pytest.approx(69.184)
+    expected = ephemeris.moon_geocentric(datetime(2026, 1, 2, tzinfo=timezone.utc))
+    local = datetime(2026, 1, 1, 18, tzinfo=timezone(timedelta(hours=-6)))
+    assert ephemeris.moon_geocentric(local) == pytest.approx(expected)
+    assert ephemeris.moon_geocentric(datetime(2026, 1, 2)) == pytest.approx(expected)
+
+
 _AU_KM = 149_597_870.7
 
 

@@ -28,6 +28,9 @@ BODIES = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--bodies", nargs="+", choices=list(BODIES), default=list(BODIES)
+    )
+    parser.add_argument(
         "--years",
         nargs="+",
         type=int,
@@ -48,8 +51,11 @@ def main():
         "scope": "Sampled comparisons only; not a continuous error bound or telescope-pointing validation",
         "bodies": {},
     }
-    for body, command in BODIES.items():
-        vectors = fetch_vectors(command, dates)
+    for body in args.bodies:
+        command = BODIES[body]
+        vectors = []
+        for offset in range(0, len(dates), 50):
+            vectors.extend(fetch_vectors(command, dates[offset : offset + 50]))
         samples = []
         for date, vector in zip(dates, vectors):
             if body in ("sun", "moon"):

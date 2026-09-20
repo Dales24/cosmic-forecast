@@ -31,10 +31,12 @@ Before real-data training, review dataset provenance and evaluation splits.
   outside a +/-7-day display policy. The map summarizes these extrapolations.
   The policy is not an accuracy guarantee; historical validation remains open.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
-  A 252-position Horizons comparison across 1800–2050 is complete; see
-  [sampled results](ephemeris-validation.md). Moon differences reach about
-  3.06 degrees. Fix the lunar approximation and validate more densely before
-  advertising an accuracy bound or supporting telescope pointing.
+  The lunar series/frame/time correction is implemented. The original Moon
+  sample improved from 3.06 degrees to 0.00183 degrees; 1,004 quarterly samples
+  across 1800–2050 peaked at 0.00393 degrees. See
+  [sampled results](ephemeris-validation.md). Planet approximations, historical
+  time uncertainty and unknown future leap seconds still prevent continuous
+  accuracy guarantees or telescope-pointing claims.
 
 ## Classification and models
 

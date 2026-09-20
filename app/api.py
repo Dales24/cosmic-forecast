@@ -691,7 +691,7 @@ def _moon_scene_object(dt: datetime) -> dict:
             "Earth's only natural satellite; its gravity drives the ocean tides "
             "and it always shows us the same face."
         ),
-        "position_note": "Approximate lunar position for display. Historical sample comparisons with Horizons differ by up to about 3 degrees; not validated for pointing.",
+        "position_note": "Approximate ERFA Moon98 lunar position in GCRS, computed with terrestrial time. Sampled against Horizons; no continuous accuracy guarantee or pointing validation.",
     }
 
 
