@@ -111,7 +111,9 @@ Horizons; playback uses a linear velocity tangent. Horizons failures retain
 disclosed fallbacks and source warnings. Satellites report TLE epoch offsets
 and flag dates outside a +/-7-day display policy, which is not an accuracy bound.
 See [sampled ephemeris validation](docs/ephemeris-validation.md) for measured
-differences against Horizons, including the remaining lunar limitation.
+differences against Horizons. Lunar positions use local ERFA Moon98 calculations
+in GCRS with terrestrial-time conversion; historical/future time uncertainty and
+unsampled dates still limit accuracy claims.
 
 Map classification is a demo using a generated image patch influenced by the
 selected kind. Its API response identifies `input_source: synthetic_patch` and
@@ -203,6 +205,15 @@ macOS retain TensorFlow CPU 2.16.2. See [platform policy](docs/environment.md#pl
 > **Note:** The retained TensorFlow 2.16 runtime imports `distutils`, which Python 3.12 dropped from
 > the stdlib. `setuptools<74` (pinned) restores it at runtime, and the root
 > `conftest.py` activates the shim before pytest collects any TF-importing test.
+
+Classifier folder training scales pixels to 0–1, matching inference. Synthetic
+CLI training splits examples per class so every class appears in training and
+validation (at least two examples per class are required). Real-image directory
+splits are random by image; scientific evaluation needs independent held-out
+objects or observing sessions to avoid related-image leakage.
+Use `--manifest` for explicit group-disjoint train/validation/test partitions,
+or `--manifest ... --prepare-only` to validate data before training. See
+[classifier holdouts](docs/classifier-evaluation.md) for the CSV format and reports.
 
 ## Publishing a model
 

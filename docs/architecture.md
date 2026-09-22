@@ -124,7 +124,11 @@ it neither suppresses objects nor establishes accuracy or selects historical TLE
 `scripts.validate_ephemeris` compares local approximations to geometric Horizons
 vectors and saves reference vectors and sampled differences under ignored data/.
 See [validation results](ephemeris-validation.md); the Moon approximation remains
-unsuitable for precise historical pointing.
+unsuitable for precise historical pointing. The former abbreviated lunar series
+has been replaced by local `pyerfa` Moon98 (GCRS). Input civil time is converted
+to TT using ERFA's UTC/TAI table for 1960 onward and historical delta-T estimates
+earlier. Future leap seconds are not predicted. No network is needed at runtime
+for lunar positions.
 
 Scene fetch exceptions pass through `_source_unavailable`, which logs details,
 updates `metrics.source_failures`, and returns an empty result with source
@@ -137,6 +141,16 @@ and failed attempts are persisted with the TLE and returned in
 names fallback coverage. Stale-download status is shown separately.
 
 ## Classification and forecasting
+
+Classifier directory loading rescales image pixels from 0–255 to 0–1, matching
+array-based training and inference, including dark byte-valued patches. The
+synthetic training CLI uses a seeded per-class split with disjoint partitions.
+Real directory datasets still use Keras' random image split; object/session-level
+holdouts remain necessary for scientific validation.
+`app/classifier_data.py` supports explicit CSV partitions via the classifier
+CLI's `--manifest` option. It validates group and input disjointness, normalizes
+pixels and reports class counts. Test evaluation runs only after completed
+training; see [classifier holdouts](classifier-evaluation.md).
 
 ### Web request behavior
 

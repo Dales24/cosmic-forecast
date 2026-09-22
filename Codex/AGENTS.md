@@ -13,6 +13,8 @@ models for object classification and trajectory forecasting.
 - `app/api.py` owns API routes, scene assembly, and static-page serving.
 - `app/data_parser.py` fetches and normalizes CelesTrak, JPL, and SIMBAD data.
 - `app/ephemeris.py` computes local solar-system body positions.
+  Lunar positions use ERFA Moon98 in GCRS with TT conversion; preserve explicit
+  historical and future time assumptions when changing this calculation.
 - `app/horizons.py` retrieves geometric JPL reference vectors for NEO placement
   and sampled validation; `scripts/validate_ephemeris.py` records comparisons.
 - `app/orbital_forecast.py` and `scripts/train_orbital_forecast.py` support

@@ -33,6 +33,32 @@ jobs:
           uv run flake8 app/ tests/ scripts/
       - name: Test with coverage
         run: uv run pytest --cov=. --cov-fail-under=80
+      - name: Create trained portability fixtures
+        run: uv run python -m scripts.check_model_portability generate models/compat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-compat-${{ runner.os }}
+          path: models/compat/
+          retention-days: 3
+
+  model-portability:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: 3.12
+      - run: uv sync --frozen
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: model-compat-*
+          path: models/compat-input
+      - run: uv run python -m scripts.check_model_portability verify models/compat-input
 
   frontend:
     runs-on: ubuntu-latest
@@ -53,7 +79,7 @@ jobs:
 
   # Validate the Docker image builds on version tags, only after tests pass.
   release:
-    needs: [test, frontend]
+    needs: [test, frontend, model-portability]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

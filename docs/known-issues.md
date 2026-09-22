@@ -31,10 +31,12 @@ Before real-data training, review dataset provenance and evaluation splits.
   outside a +/-7-day display policy. The map summarizes these extrapolations.
   The policy is not an accuracy guarantee; historical validation remains open.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
-  A 252-position Horizons comparison across 1800–2050 is complete; see
-  [sampled results](ephemeris-validation.md). Moon differences reach about
-  3.06 degrees. Fix the lunar approximation and validate more densely before
-  advertising an accuracy bound or supporting telescope pointing.
+  The lunar series/frame/time correction is implemented. The original Moon
+  sample improved from 3.06 degrees to 0.00183 degrees; 1,004 quarterly samples
+  across 1800–2050 peaked at 0.00393 degrees. See
+  [sampled results](ephemeris-validation.md). Planet approximations, historical
+  time uncertainty and unknown future leap seconds still prevent continuous
+  accuracy guarantees or telescope-pointing claims.
 
 ## Classification and models
 
@@ -42,6 +44,9 @@ Before real-data training, review dataset provenance and evaluation splits.
   Supplied training uses generated patches and synthetic linear tracks.
   Obtain representative data and evaluate
   on held-out observations before presenting scientific performance claims.
+  Folder-based training now uses the same 0–1 pixel scale as prediction,
+  and synthetic CLI training preserves every class in both partitions.
+  See MODEL-04 for holdout integrity and the legacy directory loader.
 
 - **MODEL-03 · T2 · P2 — Historical orbital model needs real-data evaluation.**
   The GP/OMM residual-training pipeline is implemented, but no historical
@@ -50,12 +55,16 @@ Before real-data training, review dataset provenance and evaluation splits.
   reference positions and assess orbit, lead-time and unseen-object performance
   before integration. See [historical training](historical-training.md).
 
-## Environment and verification
+- **MODEL-04 · T2 · P1 — Real-image holdout integrity needs dataset review.**
+  The new manifest workflow enforces disjoint groups, rejects repeated inputs
+  across partitions and evaluates an explicit test set after training. Group
+  assignments and near-duplicates still need review on the real dataset.
+  Legacy `--data-dir` remains randomly split by image with no independent test
+  set. Use [classifier holdouts](classifier-evaluation.md) before real-data runs.
 
-- **TOOL-01 · T2 · P2 — TensorFlow pin constrains upgrades.**
-  Retained intentionally: TensorFlow 2.16 is the last release supporting
-  [macOS x86](https://www.tensorflow.org/install/pip). A newer TensorFlow
-  requires a platform-support change and compatibility testing. The user has
-  confirmed continued multiplatform support, including Intel Macs, so retain
-  the pin. CI covers Windows, Linux and Intel macOS; this session ran on Windows.
--- plaform to fix
+- **MODEL-05 · T2 · P2 — Cross-platform model portability is unverified.**
+  CI now exchanges trained synthetic classifier, trajectory and orbital artifacts
+  among Windows TensorFlow 2.21 and Linux/Intel macOS TensorFlow 2.16 and checks
+  inference outputs. Only the same-runtime Windows check has run locally;
+  cross-platform CI results are pending. This checks inference, not optimizer
+  resume compatibility or all future trained artifacts.
