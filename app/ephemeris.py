@@ -1,17 +1,20 @@
 """Low-precision geocentric ephemeris for the Sun, Moon, and planets.
 
-Pure math (no external services), good to roughly arc-minutes over 1800–2050 —
-plenty for placing bodies on the scene map. Everything is returned in the
+Local calculations (no external services), intended for approximate scene placement.
+Sampled Horizons comparisons do not establish an accuracy bound. The Moon uses
+ERFA's complete Moon98 series in GCRS with a terrestrial-time input. Results use the
 equatorial frame the scene uses for direction: geocentric right ascension (the
 angle) plus distance from Earth in km (the radius).
 
 Planet positions use the JPL "Keplerian Elements for Approximate Positions of
-the Major Planets" (Standish); the Moon uses an abbreviated Meeus series.
+the Major Planets" (Standish); the Moon uses ERFA's Meeus implementation.
 """
 
 from __future__ import annotations
 
 import math
+import warnings
+import erfa
 from datetime import datetime, timezone
 
 _J2000 = 2451545.0
@@ -161,30 +164,66 @@ def sun_geocentric(dt: datetime) -> tuple[float, float, float]:
     return ra, dec, dist_km
 
 
-def moon_geocentric(dt: datetime) -> tuple[float, float, float]:
-    """Geocentric (right ascension, declination) in rad and distance in km."""
-    days = _julian_day(dt) - _J2000
-    # Fundamental arguments (deg), abbreviated Meeus.
-    mean_long = 218.316 + 13.176396 * days
-    mean_anom = math.radians(134.963 + 13.064993 * days)
-    elongation = math.radians(297.850 + 12.190749 * days)
-    arg_lat = math.radians(93.272 + 13.229350 * days)
+def _historical_delta_t(year: float) -> float:
+    """Espenak/Meeus TT-UT estimates for the pre-1960 display dates.
 
-    lon = math.radians(
-        mean_long
-        + 6.289 * math.sin(mean_anom)
-        + 1.274 * math.sin(2 * elongation - mean_anom)
-        + 0.658 * math.sin(2 * elongation)
-    )
-    lat = math.radians(5.128 * math.sin(arg_lat))
-    dist_km = (
-        385000.56
-        - 20905.355 * math.cos(mean_anom)
-        - 3699.111 * math.cos(2 * elongation - mean_anom)
-    )
-    # Ecliptic spherical → rectangular → equatorial.
-    x = math.cos(lat) * math.cos(lon)
-    y = math.cos(lat) * math.sin(lon)
-    z = math.sin(lat)
-    ra, dec = _ecliptic_to_equatorial(x, y, z)
-    return ra, dec, dist_km
+    Coefficients: https://eclipse.gsfc.nasa.gov/SEcat5/deltatpoly.html
+    Earlier than 1800 is outside our sampled range; use the broad quadratic.
+    """
+    if year < 1800:
+        return -20 + 32 * ((year - 1820) / 100) ** 2
+    for end, origin, coefficients in (
+        (
+            1860,
+            1800,
+            (
+                13.72,
+                -0.332447,
+                0.0068612,
+                0.0041116,
+                -0.00037436,
+                0.0000121272,
+                -0.0000001699,
+                0.000000000875,
+            ),
+        ),
+        (1900, 1860, (7.62, 0.5737, -0.251754, 0.01680668, -0.0004473624, 1 / 233174)),
+        (1920, 1900, (-2.79, 1.494119, -0.0598939, 0.0061966, -0.000197)),
+        (1941, 1920, (21.20, 0.84493, -0.076100, 0.0020936)),
+        (1960, 1950, (29.07, 0.407, -1 / 233, 1 / 2547)),
+    ):
+        if year < end:
+            t = year - origin
+            return sum(
+                coefficient * t**power for power, coefficient in enumerate(coefficients)
+            )
+    raise ValueError("Historical delta-T helper requires a pre-1960 date")
+
+
+def _tt_offset_seconds(dt: datetime) -> float:
+    """TT minus civil input: historical UT estimates or ERFA's UTC/TAI table.
+
+    Before UTC existed, interpret the input as UT. For future dates ERFA holds
+    the last known TAI-UTC offset; unknown future leap seconds are not forecast.
+    """
+    if dt.year < 1960:
+        return _historical_delta_t(dt.year + (dt.month - 0.5) / 12)
+    fraction = (
+        dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
+    ) / 86400
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=".*dubious year.*", category=erfa.ErfaWarning
+        )
+        return float(erfa.dat(dt.year, dt.month, dt.day, fraction)) + 32.184
+
+
+def moon_geocentric(dt: datetime) -> tuple[float, float, float]:
+    """Approximate geometric GCRS right ascension/declination and distance km."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt = dt.astimezone(timezone.utc)
+    days_tt = (_julian_day(dt) - _J2000) + _tt_offset_seconds(dt) / 86400
+    x, y, z = erfa.moon98(_J2000, days_tt)["p"]
+    radius = math.sqrt(x * x + y * y + z * z)
+    return math.atan2(y, x) % (2 * math.pi), math.asin(z / radius), radius * _AU_KM

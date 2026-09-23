@@ -146,7 +146,21 @@ def _propagate_tles(tle_text: str, dt: datetime, limit: int, kind: str) -> list[
             )
             err, r, v = sat.sgp4(jd, fr)
             if err == 0 and r:
-                results.append(_tle_scene_object(l1[2:7].strip(), name, kind, r, v))
+                obj = _tle_scene_object(l1[2:7].strip(), name, kind, r, v)
+                offset = (jd - sat.jdsatepoch) + (fr - sat.jdsatepochF)
+                obj["tle_epoch_offset_days"] = offset
+                obj["propagation_policy_days"] = 7
+                obj["outside_propagation_policy"] = abs(offset) > 7
+                obj["motion_note"] = (
+                    f"Propagated {offset:+.2f} days from the available TLE epoch. "
+                    + (
+                        "Outside the +/-7-day display policy; long-range extrapolation. "
+                        if abs(offset) > 7
+                        else "Within the +/-7-day display policy. "
+                    )
+                    + "This is not an accuracy guarantee; historical elements were not selected."
+                )
+                results.append(obj)
         except Exception:
             pass
     return results
@@ -333,9 +347,61 @@ def _fetch_jpl_objects(date_str: str, cap: int) -> CappedObjects:
                 "vy_norm": 0.0,
                 "speed_kms": speed_kms,
                 "source": "jpl",
+                "position_note": "Illustrative placement: JPL close-approach data supplies no sky direction. Display radius uses approach distance, not current distance.",
+                "motion_note": "Static in simulation; near-Earth motion is not modeled.",
             }
         )
     return CappedObjects(objects, hidden, hidden_exact)
+
+
+def _jpl_positioned_objects(dt: datetime, cap: int) -> CappedObjects:
+    """Resolve CAD candidates with Horizons, retaining disclosed fallbacks."""
+    from app.horizons import fetch_vectors
+
+    def fetch():
+        catalog = _jpl_scene_objects(dt.strftime("%Y-%m-%d"), cap)
+        objects, failed = [], 0
+        # Serial Horizons requests respect the service's one-request-at-a-time policy.
+        for index, candidate in enumerate(catalog.objects):
+            obj = dict(candidate)
+            try:
+                if index >= 10:
+                    raise ValueError("Horizons per-scene request cap reached")
+                vector = fetch_vectors(f"DES={obj['name']};", [dt])[0]
+                r, v = vector[:3], vector[3:]
+                distance = float(np.linalg.norm(r))
+                ra = atan2(r[1], r[0])
+                x, y = _radec_scene_xy(ra, distance)
+                future = r + v  # one-second geometric tangent for display velocity
+                fx, fy = _radec_scene_xy(
+                    atan2(future[1], future[0]), float(np.linalg.norm(future))
+                )
+                obj.update(
+                    x_norm=x,
+                    y_norm=y,
+                    vx_norm=fx - x,
+                    vy_norm=fy - y,
+                    ra_deg=degrees(ra) % 360,
+                    dec_deg=degrees(asin(r[2] / distance)),
+                    speed_kms=float(np.linalg.norm(v)),
+                    position_note="JPL Horizons geometric geocentric ICRF position at the scene time; radius uses current distance.",
+                    motion_note="Playback uses a linear tangent to the Horizons velocity, not a continuously recomputed orbit.",
+                    position_source="jpl_horizons",
+                )
+            except Exception as exc:
+                failed += 1
+                _source_unavailable("jpl_horizons", "near_earth_object", exc)
+            objects.append(obj)
+        return CappedObjects(
+            objects,
+            catalog.hidden,
+            catalog.hidden_exact,
+            "jpl_horizons" if failed else catalog.unavailable_source,
+        )
+
+    return _cached_catalog(
+        ("jpl_positioned", dt.isoformat(), cap), _JPL_TTL_SECONDS, fetch
+    )
 
 
 # Deep-space kinds pulled into every scene from SIMBAD (the kind is also the
@@ -493,6 +559,7 @@ def _fetch_simbad_objects(kind: str, cap: int) -> CappedObjects:
                 "vy_norm": 0.0,
                 "speed_kms": 0.0,
                 "source": "simbad",
+                "motion_note": "Static in simulation; catalog positions do not advance during playback.",
                 "ra_deg": ra % 360.0,
                 "dec_deg": dec,
             }
@@ -624,6 +691,7 @@ def _moon_scene_object(dt: datetime) -> dict:
             "Earth's only natural satellite; its gravity drives the ocean tides "
             "and it always shows us the same face."
         ),
+        "position_note": "Approximate ERFA Moon98 lunar position in GCRS, computed with terrestrial time. Sampled against Horizons; no continuous accuracy guarantee or pointing validation.",
     }
 
 
@@ -731,7 +799,7 @@ def _capped_scene_objects(
         _debris_scene_objects, dt, caps["space_debris"], debris_field
     )
     fetchers["near_earth_object"] = partial(
-        _jpl_scene_objects, date_str, caps["near_earth_object"]
+        _jpl_positioned_objects, dt, caps["near_earth_object"]
     )
     fetchers.update(
         {
@@ -922,6 +990,12 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
             if row.get("unavailable_source")
         ],
     }
+    outside = sum(bool(obj.get("outside_propagation_policy")) for obj in objects)
+    result["propagation_policy"] = {
+        "days_from_epoch": 7,
+        "outside_count": outside,
+        "accuracy_validated": False,
+    }
     debris_row = next((row for row in cap_rows if row["kind"] == "space_debris"), None)
     if debris_row and debris_row.get("metadata"):
         result["debris_coverage"] = debris_row["metadata"]
@@ -955,14 +1029,24 @@ def _build_scene(datetime_str, limit, ra, dec, radius_deg, debris_field="all"):
             row["valid_until"] for row in result["source_freshness"]
         )
     if search_ra is not None and search_dec is not None:
-        total = len(objects)
+        excluded = {}
+        for obj in objects:
+            if obj["kind"] not in _UNPLACEABLE_KEEP_KINDS and (
+                obj.get("ra_deg") is None or obj.get("dec_deg") is None
+            ):
+                excluded[obj["kind"]] = excluded.get(obj["kind"], 0) + 1
+        observers = sum(obj["kind"] in _UNPLACEABLE_KEEP_KINDS for obj in objects)
+        total = len(objects) - sum(excluded.values()) - observers
         result["objects"] = _objects_near(objects, search_ra, search_dec, radius_deg)
         result["search"] = {
             "ra_deg": search_ra,
             "dec_deg": search_dec,
             "radius_deg": radius_deg,
-            "matched": len(result["objects"]),
+            "matched": len(result["objects"]) - observers,
             "searched": total,
+            "excluded_without_coordinates": excluded,
+            "excluded_count": sum(excluded.values()),
+            "observer_count": observers,
         }
     _cache_scene(cache_key, result)
     return result
@@ -998,7 +1082,12 @@ def classify_object(obj_id: int, kind: str | None = None):
     else:
         rng = np.random.default_rng(seed=obj_id * 137 + 42)
         patch = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
-    return predict_patch(cnn, patch)
+    return {
+        **predict_patch(cnn, patch),
+        "input_source": "synthetic_patch",
+        "is_demo": True,
+        "notice": "Demo classification of a generated image patch, not an observation of the selected object. The requested kind influences the generated patch; the score is not verified object confidence.",
+    }
 
 
 @app.post("/api/upload/csv")
@@ -1091,7 +1180,12 @@ async def classify_upload(file: UploadFile = File(...)):
     from app.object_classifier import predict_patch
 
     cnn = _get_cnn()
-    return predict_patch(cnn, patch)
+    return {
+        **predict_patch(cnn, patch),
+        "input_source": "uploaded_image",
+        "is_demo": False,
+        "notice": "Classification uses your uploaded image. Model scores have not been validated as scientific confidence.",
+    }
 
 
 @app.post("/api/forecast")

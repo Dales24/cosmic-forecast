@@ -330,6 +330,14 @@ async function loadScene(datetimeISO, search) {
     }
     const data = await resp.json();
     sceneObjects = data.objects || [];
+    const propagationWarning = document.getElementById("propagation-warning");
+    if (propagationWarning) {
+      const outside = data.propagation_policy?.outside_count || 0;
+      propagationWarning.textContent = outside
+        ? outside + " satellite/debris objects are outside the +/-7-day TLE display policy. Positions are long-range extrapolations, not validated historical positions."
+        : "";
+      propagationWarning.hidden = !outside;
+    }
     const timestamp = document.getElementById("scene-timestamp");
     if (timestamp) timestamp.textContent = data.datetime
       ? "Scene time: " + new Date(data.datetime).toISOString() : "";
@@ -1640,6 +1648,17 @@ function showObjectInfo(idx) {
   const obj   = sceneObjects[idx];
   if (!obj) return;
 
+  for (const [id, note] of [
+    ["obj-position-note", obj.position_note],
+    ["obj-motion-note", obj.motion_note],
+  ]) {
+    const element = document.getElementById(id);
+    if (element) {
+      element.textContent = note || "";
+      element.hidden = !note;
+    }
+  }
+
   const xn   = obj.x_norm;
   const yn   = obj.y_norm;
   const dist = Math.hypot(xn, yn);
@@ -1840,6 +1859,13 @@ function sceneResultHTML(ra, dec, utcMinutes, result) {
   const tally = search
     ? '<p>' + search.matched + ' of ' + search.searched + ' objects in this patch of sky</p>'
     : '<p>' + result.count + ' object' + (result.count === 1 ? '' : 's') + ' loaded</p>';
+  const excluded = search && search.excluded_count
+    ? '<p>Excluded without sky coordinates: ' +
+      Object.entries(search.excluded_without_coordinates || {}).map(([kind, count]) =>
+        esc(KIND_NAMES[kind] || kind) + ': ' + esc(String(count))).join(', ') + '.</p>'
+    : '';
+  const observer = search && search.observer_count
+    ? '<p>Earth is retained as the observer and is not counted as a search match.</p>' : '';
   const debris = result.debrisCoverage
     ? '<p>Debris coverage: ' + esc(result.debrisCoverage.label) +
       (result.debrisCoverage.duplicates_removed
@@ -1860,6 +1886,7 @@ function sceneResultHTML(ra, dec, utcMinutes, result) {
       coords +
       '<p>Time: ' + esc(utcMinutes) + ' UTC</p>' +
       tally +
+      excluded + observer +
       satellite +
       rocketBody +
       debris +

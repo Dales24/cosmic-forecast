@@ -27,6 +27,9 @@
         <summary>Orbital Map</summary>
         <div class="map-legend-content">
           <p id="scene-timestamp"></p>
+          <p class="hint">Compressed map: angle follows right ascension; distance is compressed and declination is mostly collapsed. Nearby marks may be far apart in the sky. Search circles may look distorted.</p>
+          <p class="hint">NEOs use Horizons positions when available; fallback placement is illustrative and static. SIMBAD objects remain static.</p>
+          <p id="propagation-warning" class="hint" role="status" hidden></p>
           <p id="satellite-coverage" class="catalog-coverage"></p>
           <p id="rocket-body-coverage" class="catalog-coverage"></p>
           <p id="source-warning" role="status" aria-live="polite" hidden></p>
@@ -129,6 +132,7 @@
         <details class="panel-section">
           <summary>Classify Image Patch</summary>
           <div class="panel-section-content upload-classifier">
+          <p class="hint">Classifies your uploaded image. Model scores have not been validated as scientific confidence.</p>
           <div class="upload-zone" id="upload-zone">
             <span class="upload-icon">🔭</span>
             <span>Drop an image or <label for="img-upload" class="upload-link">browse</label></span>
@@ -141,7 +145,7 @@
                 <div id="upload-class-name" class="upload-class-label">—</div>
                 <div id="upload-group-wrap" style="margin-top:0.25rem"></div>
                 <div class="upload-conf-row">
-                  <span class="key">Confidence</span>
+                  <span class="key">Model score</span>
                   <span id="upload-conf-pct" class="val">—</span>
                 </div>
                 <div class="conf-bar-wrap">
@@ -180,14 +184,15 @@
         </div>
 
         <details class="obj-section" open>
-          <summary class="obj-section-title">Classification</summary>
+          <summary class="obj-section-title">Demo classification</summary>
+          <p class="hint">Uses a generated image patch influenced by the selected type, not an observation of this object. Scores are demo model output.</p>
           <div class="obj-row">
             <span class="key">Class</span>
             <span class="val" id="obj-class">&#8212;</span>
           </div>
           <div id="obj-group-wrap" style="margin-top:0.35rem"></div>
           <div class="obj-row" style="margin-top:0.5rem">
-            <span class="key">Confidence</span>
+            <span class="key">Demo score</span>
             <span class="val" id="obj-conf">&#8212;</span>
           </div>
           <div class="conf-bar-wrap">
@@ -217,6 +222,8 @@
 
         <details class="obj-section" open>
           <summary class="obj-section-title">Details</summary>
+          <p class="hint" id="obj-position-note" hidden></p>
+          <p class="hint" id="obj-motion-note" hidden></p>
           <div class="obj-row">
             <span class="key">Source</span>
             <span class="val" id="obj-orbit">&#8212;</span>
@@ -238,7 +245,7 @@
           <a class="obj-info-link" id="obj-info-link" href="#" rel="noopener">Further info &rarr;</a>
         </details>
 
-        <p class="hint">Press <strong>&#9654; Play Simulation</strong> to fast-forward paths and see ML-predicted trajectories.</p>
+        <p class="hint">Press <strong>&#9654; Play Simulation</strong> to view linear extrapolations. Illustrative NEO fallbacks and SIMBAD objects stay static.</p>
       </div>
 
     </div>

@@ -22,12 +22,30 @@ The current dependency set targets Python 3.12 on Linux x64, Windows x64, and
 Intel macOS. CI defines jobs for each; configuring the jobs does not establish
 that a particular PR has passed them.
 
-TensorFlow stays at 2.16.2 because 2.16 is the last release supporting
-[Intel macOS](https://www.tensorflow.org/install/pip). Windows uses
-`tensorflow-intel`; the other platforms use `tensorflow-cpu`. Copy-mode `uv`
-installation and the existing setuptools compatibility pin are retained.
-Upgrading TensorFlow requires a deliberate decision about Intel-mac support.
+Dependency markers allow Windows to upgrade independently:
+
+| Platform | TensorFlow dependency |
+| --- | --- |
+| Windows x64 | `tensorflow==2.21.0` |
+| Linux x64 / Intel macOS | `tensorflow-cpu==2.16.2` |
+
+Version 2.16 retains [Intel macOS support](https://www.tensorflow.org/install/pip).
+The Windows package is the full `tensorflow` distribution, replacing the older
+`tensorflow-intel` dependency. `uv sync --frozen` selects the platform's locked
+dependencies automatically. Copy-mode installation and the setuptools shim
+needed by the older runtime remain enabled. This configures native Windows CPU
+TensorFlow; it does not add native Windows CUDA support.
+Model serialization is tested within each platform's runtime; cross-version
+artifact portability must be checked before sharing trained models between them.
+CI's `model-portability` job downloads synthetic trained artifacts from all
+three producer platforms and compares inference for all three model architectures
+with relative tolerance 1e-4 and absolute tolerance 1e-5. It is also required by
+the release job. Local same-runtime success is not evidence of cross-platform
+success; optimizer-state resume compatibility is outside this check.
 Apple Silicon is not covered by this CI matrix.
+The Windows 2.21.0 runtime passed the full 450-test backend suite on 2026-09-20,
+including training and model save/load checks. Linux/macOS execution remains
+covered by CI rather than this Windows session.
 
 ## Scripts and artifact locations
 

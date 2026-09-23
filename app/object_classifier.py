@@ -58,12 +58,13 @@ def create_cnn_model(
 
 def _normalize_patch(patch: np.ndarray) -> np.ndarray:
     """Scale a single patch to float32 in [0, 1] with shape (H, W, 3)."""
-    array = np.asarray(patch, dtype=np.float32)
+    source = np.asarray(patch)
+    array = source.astype(np.float32)
     if array.ndim == 2:
         array = np.stack([array] * 3, axis=-1)
     elif array.shape[-1] == 1:
         array = np.repeat(array, 3, axis=-1)
-    if array.max() > 1.0:
+    if np.issubdtype(source.dtype, np.integer) or array.max() > 1.0:
         array = array / 255.0
     return array
 
@@ -99,7 +100,37 @@ def load_image_dataset(data_dir: str | Path, validation_split: float = 0.2):
         subset="validation",
         seed=42,
     )
-    return train_ds, val_ds
+
+    # Keras' directory loader returns float32 pixels on the 0..255 scale.
+    # Match predict_patch and array-based training, including very dark images.
+    def normalize(images, labels):
+        return images / 255.0, labels
+
+    return train_ds.map(normalize), val_ds.map(normalize)
+
+
+def stratified_split(images, labels, validation_split=0.2, seed=42):
+    """Split synthetic examples per class, with disjoint reproducible indices.
+
+    Real observations require object/session-level holdouts, not this random
+    split, to prevent related observations leaking between partitions.
+    """
+    images, labels = np.asarray(images), np.asarray(labels)
+    if len(images) != len(labels) or not len(labels) or not 0 < validation_split < 1:
+        raise ValueError("Require matching nonempty arrays and a split between 0 and 1")
+    rng = np.random.default_rng(seed)
+    training, validation = [], []
+    for label in np.unique(labels):
+        indices = np.flatnonzero(labels == label)
+        if len(indices) < 2:
+            raise ValueError("Each class needs at least two examples to split")
+        rng.shuffle(indices)
+        count = min(len(indices) - 1, max(1, int(len(indices) * validation_split)))
+        validation.extend(indices[:count])
+        training.extend(indices[count:])
+    rng.shuffle(training)
+    rng.shuffle(validation)
+    return images[training], labels[training], images[validation], labels[validation]
 
 
 def _class_base_color(class_index: int) -> np.ndarray:

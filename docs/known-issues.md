@@ -16,47 +16,55 @@ inspection, not a security audit or load test.
 | P2 — Planned | Schedule after P1 work. |
 | P3 — Backlog | Improve when needed; intentional limitations may remain documented. |
 
-Start with MODEL-01.
+Before real-data training, review dataset provenance and evaluation splits.
 
 ## Positions, dates, and search
 
-- **POS-01 · T1 · P2 — Near-Earth object directions are placeholders.**
-  CAD supplies approach distance but no sky direction; placement uses a
-  deterministic angle. Label placement as illustrative until per-object
-  ephemerides provide real coordinates.
+- **POS-01 · T2 · P2 — NEO playback uses a linear tangent.**
+  Horizons supplies real scene-time positions and velocities for up to ten
+  CAD candidates per scene. Failed queries retain explicitly illustrative,
+  static fallbacks and source warnings. Playback uses a linear velocity tangent,
+  not continuous orbital propagation; long-duration motion still needs work.
 - **POS-02 · T2 · P2 — Satellite dates do not select historical elements.**
   Available TLEs are propagated to any requested time. Accuracy degrades away
-  from their epoch. Define and validate a propagation interval; the current
-  seven-day element-age notice does not establish an accuracy guarantee.
-- **POS-03 · T2 · P2 — JPL/SIMBAD objects stay static in simulation.**
-  Their scene velocities are zero. This is a display simplification for distant
-  objects, but does not model near-Earth motion. Add JPL ephemeris-based motion
-  or explicitly label those objects as static.
-- **POS-04 · T2 · P2 — Projection distorts apparent proximity.**
-  Declination is mostly collapsed. Adjacent map objects can be far apart in
-  the sky; spherical position-search results need not look circular on the map.
-  Explain the projection or add an RA/Dec sky view.
-- **POS-05 · T2 · P2 — Search omits objects without coordinates.**
-  Near-Earth objects are excluded; Earth remains as observer. Report excluded
-  categories so empty results are clear.
+  from their epoch. Objects now report signed epoch offsets and flag dates
+  outside a +/-7-day display policy. The map summarizes these extrapolations.
+  The policy is not an accuracy guarantee; historical validation remains open.
 - **POS-06 · T2 · P2 — Solar-system ephemerides are approximate.**
-  Validate `app/ephemeris.py` against a reference over the supported date range
-  before advertising an accuracy bound or supporting telescope pointing.
+  The lunar series/frame/time correction is implemented. The original Moon
+  sample improved from 3.06 degrees to 0.00183 degrees; 1,004 quarterly samples
+  across 1800–2050 peaked at 0.00393 degrees. See
+  [sampled results](ephemeris-validation.md). Planet approximations, historical
+  time uncertainty and unknown future leap seconds still prevent continuous
+  accuracy guarantees or telescope-pointing claims.
 
 ## Classification and models
 
-- **MODEL-01 · T1 · P1 — Map classifications use synthetic images.**
-  `/api/classify/{id}` classifies a generated patch, not an observation of the
-  selected object. Clearly label this as a demo and distinguish it from
-  uploaded-image classification. Real claims require real observations.
 - **MODEL-02 · T1 · P2 — Synthetic training does not establish scientific validity.**
   Supplied training uses generated patches and synthetic linear tracks.
   Obtain representative data and evaluate
   on held-out observations before presenting scientific performance claims.
+  Folder-based training now uses the same 0–1 pixel scale as prediction,
+  and synthetic CLI training preserves every class in both partitions.
+  See MODEL-04 for holdout integrity and the legacy directory loader.
 
-## Environment and verification
+- **MODEL-03 · T2 · P2 — Historical orbital model needs real-data evaluation.**
+  The GP/OMM residual-training pipeline is implemented, but no historical
+  dataset has been supplied or trained. Later GP estimates are proxy targets,
+  not independent position measurements. Validate against representative
+  reference positions and assess orbit, lead-time and unseen-object performance
+  before integration. See [historical training](historical-training.md).
 
-- **TOOL-01 · T2 · P2 — TensorFlow pin constrains upgrades.**
-  Retained intentionally: TensorFlow 2.16 is the last release supporting
-  [macOS x86](https://www.tensorflow.org/install/pip). A newer TensorFlow
-  requires an explicit platform-support decision and compatibility testing.
+- **MODEL-04 · T2 · P1 — Real-image holdout integrity needs dataset review.**
+  The new manifest workflow enforces disjoint groups, rejects repeated inputs
+  across partitions and evaluates an explicit test set after training. Group
+  assignments and near-duplicates still need review on the real dataset.
+  Legacy `--data-dir` remains randomly split by image with no independent test
+  set. Use [classifier holdouts](classifier-evaluation.md) before real-data runs.
+
+- **MODEL-05 · T2 · P2 — Cross-platform model portability is unverified.**
+  CI now exchanges trained synthetic classifier, trajectory and orbital artifacts
+  among Windows TensorFlow 2.21 and Linux/Intel macOS TensorFlow 2.16 and checks
+  inference outputs. Only the same-runtime Windows check has run locally;
+  cross-platform CI results are pending. This checks inference, not optimizer
+  resume compatibility or all future trained artifacts.
