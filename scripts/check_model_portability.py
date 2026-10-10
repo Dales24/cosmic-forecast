@@ -50,8 +50,19 @@ def verify(root):
     for name in ("classifier", "trajectory", "orbital"):
         model = tf.keras.models.load_model(root / f"{name}.keras", compile=False)
         with np.load(root / f"{name}.npz", allow_pickle=False) as data:
-            actual = model(data["inputs"], training=False).numpy()
-            np.testing.assert_allclose(actual, data["outputs"], rtol=1e-4, atol=1e-5)
+            inputs, expected = data["inputs"], data["outputs"]
+            if not np.isfinite(inputs).all() or not np.isfinite(expected).all():
+                raise ValueError(f"{name}: fixture contains non-finite values")
+            actual = model(inputs, training=False).numpy()
+            if actual.shape != expected.shape:
+                raise ValueError(
+                    f"{name}: output shape {actual.shape} != {expected.shape}"
+                )
+            if not np.isfinite(actual).all():
+                raise ValueError(f"{name}: inference produced non-finite values")
+            np.testing.assert_allclose(
+                actual, expected, rtol=1e-4, atol=1e-5, equal_nan=False
+            )
     print(f"Verified {root.name} on {platform.system()} TensorFlow {tf.__version__}")
 
 
