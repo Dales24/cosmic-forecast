@@ -65,6 +65,7 @@ Before real-data training, review dataset provenance and evaluation splits.
 - **MODEL-05 · T2 · P2 — Cross-platform model portability is unverified.**
   CI now exchanges trained synthetic classifier, trajectory and orbital artifacts
   among Windows TensorFlow 2.21 and Linux/Intel macOS TensorFlow 2.16 and checks
-  inference outputs. Only the same-runtime Windows check has run locally;
+  inference outputs, rejecting non-finite values and mismatched output shapes.
+  Only the same-runtime Windows check has run locally;
   cross-platform CI results are pending. This checks inference, not optimizer
   resume compatibility or all future trained artifacts.
