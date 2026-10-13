@@ -111,3 +111,28 @@ def test_portability_fixture_roundtrip_and_prediction_mismatch(tmp_path):
     np.savez(root / "orbital.npz", inputs=inputs, outputs=outputs)
     with pytest.raises(AssertionError):
         verify(root)
+
+
+@pytest.mark.parametrize(
+    "inputs,expected,actual,message",
+    [
+        ([np.nan], [1.0], [1.0], "fixture contains non-finite"),
+        ([1.0], [np.nan], [np.nan], "fixture contains non-finite"),
+        ([1.0], [np.inf], [np.inf], "fixture contains non-finite"),
+        ([1.0], [1.0], [np.inf], "inference produced non-finite"),
+        ([1.0], [1.0], [np.nan], "inference produced non-finite"),
+        ([1.0], [[1.0]], [1.0], "output shape"),
+    ],
+)
+def test_portability_rejects_invalid_outputs(
+    tmp_path, monkeypatch, inputs, expected, actual, message
+):
+    from unittest.mock import Mock
+    from scripts import check_model_portability as script
+
+    np.savez(tmp_path / "classifier.npz", inputs=inputs, outputs=expected)
+    model = Mock()
+    model.return_value.numpy.return_value = np.asarray(actual)
+    monkeypatch.setattr(script.tf.keras.models, "load_model", lambda *a, **kw: model)
+    with pytest.raises(ValueError, match=message):
+        verify(tmp_path)

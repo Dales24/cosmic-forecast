@@ -11,7 +11,9 @@ linear extrapolation rather than that full pipeline.
 The locked runtime is platform-specific: Windows uses TensorFlow 2.21.0;
 Linux and Intel macOS retain TensorFlow CPU 2.16.2. See the
 [platform policy](environment.md#platform-policy). Trained artifact portability
-across these runtime versions is not assumed.
+across these runtime versions is not assumed. The synthetic portability verifier
+requires finite inputs and predictions, exact output shapes, and inference
+agreement within the documented tolerances.
 
 The separate `app/orbital_forecast.py` module and
 `scripts/train_orbital_forecast.py` CLI support experimental historical GP/OMM
